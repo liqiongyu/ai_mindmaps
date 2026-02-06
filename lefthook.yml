@@ -1,0 +1,19 @@
+commit-msg:
+  commands:
+    commitlint:
+      run: pnpm -s commitlint --edit "$1"
+
+pre-commit:
+  parallel: true
+  commands:
+    format_check:
+      run: pnpm -s format:check
+    lint:
+      run: pnpm -s lint
+    typecheck:
+      run: pnpm -s typecheck
+
+pre-push:
+  commands:
+    test:
+      run: pnpm -s test
