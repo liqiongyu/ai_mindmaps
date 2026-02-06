@@ -71,6 +71,10 @@ gh label create "prio/p3" --color "0E8A16" --description "Low" || true
 
 GitHub 分支保护需要仓库管理员权限。下面命令使用 `gh api` 调 GitHub REST API。
 
+> 注意：如果仓库是 **private** 且账号套餐不支持分支保护，你可能会收到 `HTTP 403` 提示
+> “Upgrade to GitHub Pro or make this repository public to enable this feature.”  
+> 这时需要：升级到 GitHub Pro，或将仓库改为 public（或改用后续可用的替代机制）。
+
 说明：
 
 - 必须通过 CI
