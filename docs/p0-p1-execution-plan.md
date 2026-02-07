@@ -62,6 +62,7 @@ flowchart LR
 ### 1.3 首屏 CTA 的信息层级（P0 约束）
 
 优先级从高到低：
+
 1. `立即体验（免登录）`
 2. `登录继续（已有账号）`
 3. `注册并保存到云端`
@@ -86,7 +87,7 @@ flowchart LR
     - 可控 ops：每次改动可审计、可校验
     - 可撤销：AI 与手工操作共享撤销栈
 - 第二屏：30 秒快速上手（3 步）
-  1) 进入试玩 2) 发送一句话 3) 导出/分享
+  1. 进入试玩 2) 发送一句话 3) 导出/分享
 - 可信背书（轻量）：隐私声明一句话 + “不用于训练（MVP 文案）”
 
 #### 页面线框（低保真）
@@ -630,25 +631,25 @@ AI 请求完成并应用 ops 后，用户需要立刻“看懂发生了什么”
 
 ### 7.1 P0 Backlog（建议拆成 6–10 个可交付 PR）
 
-| ID | Prio | Type | 标题 | 产出 | 依赖 |
-|---|---|---|---|---|---|
-| P0-01 | P0 | feat | 首页产品化（/） | 新首页 + 文案统一 | 无 |
-| P0-02 | P0 | feat | 免登录试玩页（/try）+ 本地草稿保存 | /try + localStorage | 无 |
-| P0-03 | P0 | feat | 节点就地编辑 + 快捷键（基础） | 双击/F2 + Enter/Tab | 画布 node 渲染支持 |
-| P0-04 | P0 | feat | AI 变更摘要 + 节点高亮 | 摘要 UI + highlight | ops 统计 |
-| P0-05 | P0 | feat | 分享面板：公开/刷新/停止分享 | 状态展示 + stop share | API 支持停止分享 |
-| P0-06 | P0 | feat | 公开页 notes 抽屉 | drawer + markdown 渲染（可先纯文本） | 无 |
-| P0-07 | P0 | chore | 全站中文口径统一（最低集） | 文案替换 | P0-01/02/03/04/05/06 |
+| ID    | Prio | Type  | 标题                               | 产出                                 | 依赖                 |
+| ----- | ---- | ----- | ---------------------------------- | ------------------------------------ | -------------------- |
+| P0-01 | P0   | feat  | 首页产品化（/）                    | 新首页 + 文案统一                    | 无                   |
+| P0-02 | P0   | feat  | 免登录试玩页（/try）+ 本地草稿保存 | /try + localStorage                  | 无                   |
+| P0-03 | P0   | feat  | 节点就地编辑 + 快捷键（基础）      | 双击/F2 + Enter/Tab                  | 画布 node 渲染支持   |
+| P0-04 | P0   | feat  | AI 变更摘要 + 节点高亮             | 摘要 UI + highlight                  | ops 统计             |
+| P0-05 | P0   | feat  | 分享面板：公开/刷新/停止分享       | 状态展示 + stop share                | API 支持停止分享     |
+| P0-06 | P0   | feat  | 公开页 notes 抽屉                  | drawer + markdown 渲染（可先纯文本） | 无                   |
+| P0-07 | P0   | chore | 全站中文口径统一（最低集）         | 文案替换                             | P0-01/02/03/04/05/06 |
 
 ### 7.2 P1 Backlog（体验增强）
 
-| ID | Prio | Type | 标题 | 产出 | 依赖 |
-|---|---|---|---|---|---|
-| P1-01 | P1 | feat | Chat prompt chips + 约束面板 | chips + advanced panel | 无 |
-| P1-02 | P1 | feat | AI 上下文瘦身（global/node） | payload 改造 | 需要评估大图阈值 |
-| P1-03 | P1 | feat | 操作日志/审计视图（展开 ops） | message details | chat 持久化 |
-| P1-04 | P1 | feat | 工具栏分组 + 危险操作收敛 | toolbar redesign | P0 稳定后 |
-| P1-05 | P1 | feat | 视图状态持久化（折叠/选中/缩放） | local/server | 数据模型选择 |
+| ID    | Prio | Type | 标题                             | 产出                   | 依赖             |
+| ----- | ---- | ---- | -------------------------------- | ---------------------- | ---------------- |
+| P1-01 | P1   | feat | Chat prompt chips + 约束面板     | chips + advanced panel | 无               |
+| P1-02 | P1   | feat | AI 上下文瘦身（global/node）     | payload 改造           | 需要评估大图阈值 |
+| P1-03 | P1   | feat | 操作日志/审计视图（展开 ops）    | message details        | chat 持久化      |
+| P1-04 | P1   | feat | 工具栏分组 + 危险操作收敛        | toolbar redesign       | P0 稳定后        |
+| P1-05 | P1   | feat | 视图状态持久化（折叠/选中/缩放） | local/server           | 数据模型选择     |
 
 ### 7.3 每条 Issue 的模板（建议直接粘贴）
 
