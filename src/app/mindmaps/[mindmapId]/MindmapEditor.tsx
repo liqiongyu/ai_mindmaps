@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MindmapChatSidebar } from "./MindmapChatSidebar";
@@ -26,6 +27,7 @@ const NEW_NODE_DEFAULT_TITLE = "New node";
 
 export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; mindmapId: string }) {
   const persistedMindmapId = props.mode === "persisted" ? props.mindmapId : null;
+  const router = useRouter();
   const [history, setHistory] = useState<History<MindmapState> | null>(() => {
     if (props.mode !== "demo") return null;
     return createHistory(sampleMindmapState);
@@ -42,6 +44,8 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [deletingMindmap, setDeletingMindmap] = useState(false);
+  const [deleteMindmapError, setDeleteMindmapError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState<"png" | "svg" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -153,6 +157,8 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSaveError(null);
     setShareUrl(null);
     setShareError(null);
+    setDeletingMindmap(false);
+    setDeleteMindmapError(null);
     setCopied(false);
     setSharing(false);
     setExportError(null);
@@ -517,6 +523,32 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSelectedNodeId(result.nextSelectedNodeId);
   }, [apply, commit, selectedNodeId, state]);
 
+  const onMoveNode = useCallback(
+    (args: { nodeId: string; newParentId: string }): boolean => {
+      if (!state) return false;
+
+      const result = apply(
+        [{ type: "move_node", nodeId: args.nodeId, newParentId: args.newParentId }],
+        args.nodeId,
+      );
+      if (!result.ok) {
+        globalThis.alert(result.message);
+        return false;
+      }
+
+      commit(result.nextState);
+      setSelectedNodeId(result.nextSelectedNodeId);
+      setCollapsedNodeIds((current) => {
+        if (!current.has(args.newParentId)) return current;
+        const next = new Set(current);
+        next.delete(args.newParentId);
+        return next;
+      });
+      return true;
+    },
+    [apply, commit, state],
+  );
+
   const onToggleCollapse = useCallback(() => {
     if (!state) return;
     if (!selectedNodeId) return;
@@ -661,6 +693,36 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
       setSharing(false);
     }
   }, [persistedMindmapId]);
+
+  const onDeleteMindmap = useCallback(async () => {
+    if (!persistedMindmapId) return;
+    const confirmed = window.confirm("Delete this mindmap? This cannot be undone.");
+    if (!confirmed) return;
+
+    setDeletingMindmap(true);
+    setDeleteMindmapError(null);
+    try {
+      const res = await fetch(`/api/mindmaps/${persistedMindmapId}`, { method: "DELETE" });
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
+        throw new Error(
+          (json && "message" in json && json.message) || `Delete failed (${res.status})`,
+        );
+      }
+
+      router.push("/mindmaps");
+      router.refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Delete failed";
+      setDeleteMindmapError(message);
+    } finally {
+      setDeletingMindmap(false);
+    }
+  }, [persistedMindmapId, router]);
 
   const onExport = useCallback(
     async (format: "png" | "svg") => {
@@ -813,11 +875,21 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
           {persistedMindmapId ? (
             <button
               className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-              disabled={!state || sharing}
+              disabled={!state || sharing || deletingMindmap}
               onClick={onShare}
               type="button"
             >
               {sharing ? "Sharing…" : shareUrl ? "Refresh link" : "Share"}
+            </button>
+          ) : null}
+          {persistedMindmapId ? (
+            <button
+              className="rounded-md border border-red-200 px-3 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:text-red-200 dark:hover:bg-red-950/30"
+              disabled={!state || deletingMindmap}
+              onClick={onDeleteMindmap}
+              type="button"
+            >
+              {deletingMindmap ? "Deleting…" : "Delete mindmap"}
             </button>
           ) : null}
           <button
@@ -855,6 +927,11 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
       ) : (
         <div className="flex flex-1">
           <div className="flex min-h-0 flex-1 flex-col">
+            {deleteMindmapError ? (
+              <div className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200">
+                Delete failed: {deleteMindmapError}
+              </div>
+            ) : null}
             {shareError ? (
               <div className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200">
                 Share failed: {shareError}
@@ -897,6 +974,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
               <MindmapCanvas
                 ref={canvasRef}
                 collapsedNodeIds={collapsedNodeIds}
+                onMoveNode={onMoveNode}
                 onSelectNodeId={setSelectedNodeId}
                 selectedNodeId={selectedNodeId}
                 state={state}

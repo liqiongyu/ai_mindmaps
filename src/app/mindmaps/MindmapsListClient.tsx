@@ -15,6 +15,7 @@ type MindmapListItem = {
 export function MindmapsListClient({ initialMindmaps }: { initialMindmaps: MindmapListItem[] }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const mindmaps = useMemo(() => initialMindmaps, [initialMindmaps]);
@@ -89,11 +90,50 @@ export function MindmapsListClient({ initialMindmaps }: { initialMindmaps: Mindm
                   Updated: {new Date(m.updatedAt).toLocaleString()}
                 </div>
               </div>
-              {m.isPublic && m.publicSlug ? (
-                <Link className="text-xs underline" href={`/public/${m.publicSlug}`}>
-                  View share
-                </Link>
-              ) : null}
+              <div className="flex items-center gap-3">
+                {m.isPublic && m.publicSlug ? (
+                  <Link className="text-xs underline" href={`/public/${m.publicSlug}`}>
+                    View share
+                  </Link>
+                ) : null}
+                <button
+                  className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:text-red-200 dark:hover:bg-red-950/30"
+                  disabled={submitting || deletingId === m.id}
+                  onClick={async () => {
+                    const confirmed = window.confirm(
+                      `Delete "${m.title}"? This will permanently remove the mindmap.`,
+                    );
+                    if (!confirmed) return;
+
+                    setDeletingId(m.id);
+                    setError(null);
+                    try {
+                      const res = await fetch(`/api/mindmaps/${m.id}`, { method: "DELETE" });
+                      const json = (await res.json().catch(() => null)) as
+                        | { ok: true }
+                        | { ok: false; message?: string }
+                        | null;
+
+                      if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
+                        throw new Error(
+                          (json && "message" in json && json.message) ||
+                            `Delete failed (${res.status})`,
+                        );
+                      }
+
+                      router.refresh();
+                    } catch (err) {
+                      const message = err instanceof Error ? err.message : "Delete failed";
+                      setError(message);
+                    } finally {
+                      setDeletingId(null);
+                    }
+                  }}
+                  type="button"
+                >
+                  {deletingId === m.id ? "Deleting…" : "Delete"}
+                </button>
+              </div>
             </li>
           ))}
         </ul>

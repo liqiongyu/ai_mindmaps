@@ -55,3 +55,33 @@ export async function GET(
     state,
   });
 }
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ mindmapId: string }> },
+) {
+  const { mindmapId } = await params;
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.auth.getUser();
+
+  if (error || !data.user) {
+    return jsonError(401, "Unauthorized");
+  }
+
+  const { data: deleted, error: deleteError } = await supabase
+    .from("mindmaps")
+    .delete()
+    .eq("id", mindmapId)
+    .eq("owner_id", data.user.id)
+    .select("id")
+    .maybeSingle();
+
+  if (deleteError) {
+    return jsonError(500, "Failed to delete mindmap", { detail: deleteError.message });
+  }
+  if (!deleted) {
+    return jsonError(404, "Mindmap not found");
+  }
+
+  return NextResponse.json({ ok: true });
+}
