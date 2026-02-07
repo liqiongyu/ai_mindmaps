@@ -1,0 +1,72 @@
+import { z } from "zod";
+
+import type { MindmapNode, MindmapState } from "./ops";
+
+export const MindmapNodeSchema = z.object({
+  id: z.string().min(1),
+  parentId: z.string().min(1).nullable(),
+  text: z.string().min(1),
+  notes: z.string().nullable(),
+  orderIndex: z.number().int().nonnegative(),
+});
+
+export const MindmapStateSchema = z
+  .object({
+    rootNodeId: z.string().min(1),
+    nodesById: z.record(z.string().min(1), MindmapNodeSchema),
+  })
+  .superRefine((value, ctx) => {
+    const root = value.nodesById[value.rootNodeId];
+    if (!root) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "rootNodeId must exist in nodesById",
+        path: ["rootNodeId"],
+      });
+      return;
+    }
+    if (root.parentId !== null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Root node parentId must be null",
+        path: ["nodesById", value.rootNodeId, "parentId"],
+      });
+    }
+  });
+
+export type MindmapNodeRow = {
+  id: string;
+  mindmap_id: string;
+  parent_id: string | null;
+  text: string;
+  notes: string | null;
+  order_index: number;
+};
+
+export function mindmapStateToNodeRows(mindmapId: string, state: MindmapState): MindmapNodeRow[] {
+  return Object.values(state.nodesById).map((node) => ({
+    id: node.id,
+    mindmap_id: mindmapId,
+    parent_id: node.parentId,
+    text: node.text,
+    notes: node.notes,
+    order_index: node.orderIndex,
+  }));
+}
+
+export function nodeRowsToMindmapState(
+  rootNodeId: string,
+  rows: Array<Pick<MindmapNodeRow, "id" | "parent_id" | "text" | "notes" | "order_index">>,
+): MindmapState {
+  const nodesById: Record<string, MindmapNode> = {};
+  for (const row of rows) {
+    nodesById[row.id] = {
+      id: row.id,
+      parentId: row.parent_id,
+      text: row.text,
+      notes: row.notes,
+      orderIndex: row.order_index,
+    };
+  }
+  return { rootNodeId, nodesById };
+}
