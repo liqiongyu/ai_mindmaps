@@ -29,6 +29,10 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     props.mode === "demo" ? "idle" : "loading",
   );
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSeqRef = useRef(0);
@@ -47,6 +51,10 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     let cancelled = false;
     setLoadError(null);
     setSaveError(null);
+    setShareUrl(null);
+    setShareError(null);
+    setCopied(false);
+    setSharing(false);
     setSaveStatus("loading");
     setState(null);
     setSelectedNodeId(null);
@@ -208,6 +216,41 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSelectedNodeId(result.nextSelectedNodeId);
   }, [apply, selectedNodeId, state]);
 
+  const onShare = useCallback(async () => {
+    if (!persistedMindmapId) return;
+    setSharing(true);
+    setShareError(null);
+    setCopied(false);
+    try {
+      const res = await fetch(`/api/mindmaps/${persistedMindmapId}/share`, { method: "POST" });
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true; publicSlug: string }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || json.ok !== true) {
+        throw new Error(
+          (json && "message" in json && json.message) || `Share failed (${res.status})`,
+        );
+      }
+
+      const url = new URL(`/public/${json.publicSlug}`, window.location.origin).toString();
+      setShareUrl(url);
+
+      try {
+        await navigator.clipboard.writeText(url);
+        setCopied(true);
+      } catch {
+        // Clipboard not available; user can copy manually.
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Share failed";
+      setShareError(message);
+    } finally {
+      setSharing(false);
+    }
+  }, [persistedMindmapId]);
+
   const statusLabel = useMemo(() => {
     if (props.mode === "demo") return "Demo";
     switch (saveStatus) {
@@ -260,6 +303,16 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
           >
             Delete
           </button>
+          {persistedMindmapId ? (
+            <button
+              className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+              disabled={!state || sharing}
+              onClick={onShare}
+              type="button"
+            >
+              {sharing ? "Sharing…" : shareUrl ? "Refresh link" : "Share"}
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -278,6 +331,34 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
         </div>
       ) : (
         <>
+          {shareError ? (
+            <div className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200">
+              Share failed: {shareError}
+            </div>
+          ) : null}
+          {shareUrl ? (
+            <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <a className="underline" href={shareUrl} rel="noreferrer" target="_blank">
+                  {shareUrl}
+                </a>
+                <button
+                  className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] hover:bg-white dark:border-zinc-800 dark:hover:bg-zinc-900"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(shareUrl);
+                      setCopied(true);
+                    } catch {
+                      setCopied(false);
+                    }
+                  }}
+                  type="button"
+                >
+                  {copied ? "Copied" : "Copy link"}
+                </button>
+              </div>
+            </div>
+          ) : null}
           {saveError ? (
             <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
               Save failed: {saveError}
