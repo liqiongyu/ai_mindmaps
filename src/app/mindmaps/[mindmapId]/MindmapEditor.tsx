@@ -11,6 +11,7 @@ import { MindmapNodeInspectorModal } from "./MindmapNodeInspectorModal";
 import type { MindmapState, Operation } from "@/lib/mindmap/ops";
 import { applyOperations } from "@/lib/mindmap/ops";
 import { makeMindmapExportFilename } from "@/lib/mindmap/export";
+import { getMindmapEditorKeyAction } from "@/lib/mindmap/keybindings";
 import { sampleMindmapState } from "@/lib/mindmap/sample";
 import type { History } from "@/lib/mindmap/history";
 import { commitHistory, createHistory, redoHistory, undoHistory } from "@/lib/mindmap/history";
@@ -67,6 +68,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     if (desired && initialState.nodesById[desired]) return desired;
     return initialState.rootNodeId;
   });
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => {
     if (props.mode === "demo") return "idle";
@@ -171,6 +173,14 @@ export function MindmapEditor(props: MindmapEditorProps) {
     setSelectedNodeId((currentSelected) => {
       if (!currentSelected) return state.rootNodeId;
       return state.nodesById[currentSelected] ? currentSelected : state.rootNodeId;
+    });
+  }, [state]);
+
+  useEffect(() => {
+    if (!state) return;
+    setEditingNodeId((currentEditing) => {
+      if (!currentEditing) return currentEditing;
+      return state.nodesById[currentEditing] ? currentEditing : null;
     });
   }, [state]);
 
@@ -454,6 +464,149 @@ export function MindmapEditor(props: MindmapEditorProps) {
     });
   }, []);
 
+  const apply = useCallback(
+    (ops: Operation[], nextSelectedNodeId: string | null): EditorActionResult => {
+      const current = stateRef.current;
+      if (!current) {
+        return { ok: false, message: "Mindmap not loaded yet" };
+      }
+
+      try {
+        const nextState = applyOperations(current, ops);
+        return { ok: true, nextState, nextSelectedNodeId };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        return { ok: false, message };
+      }
+    },
+    [],
+  );
+
+  const onRequestEditNodeId = useCallback((nodeId: string) => {
+    const current = stateRef.current;
+    if (!current?.nodesById[nodeId]) return;
+    setInspectorOpen(false);
+    setSelectedNodeId(nodeId);
+    setEditingNodeId(nodeId);
+  }, []);
+
+  const onCancelEditNodeId = useCallback((nodeId: string) => {
+    setEditingNodeId((current) => (current === nodeId ? null : current));
+  }, []);
+
+  const onCommitNodeTitle = useCallback(
+    ({ nodeId, title }: { nodeId: string; title: string }): { ok: true } | { ok: false } => {
+      const current = stateRef.current;
+      if (!current) return { ok: false };
+      const node = current.nodesById[nodeId];
+      if (!node) return { ok: false };
+
+      const nextTitle = title.trim();
+      if (!nextTitle) return { ok: false };
+
+      if (nextTitle === node.text) {
+        setEditingNodeId((currentEditing) => (currentEditing === nodeId ? null : currentEditing));
+        return { ok: true };
+      }
+
+      try {
+        const next = applyOperations(current, [{ type: "rename_node", nodeId, text: nextTitle }]);
+        commit(next);
+        setSelectedNodeId(nodeId);
+        setEditingNodeId((currentEditing) => (currentEditing === nodeId ? null : currentEditing));
+        return { ok: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to rename node";
+        globalThis.alert(message);
+        return { ok: false };
+      }
+    },
+    [commit],
+  );
+
+  const addChildForNode = useCallback(
+    (parentId: string) => {
+      const current = stateRef.current;
+      if (!current?.nodesById[parentId]) return null;
+
+      const nodeId = globalThis.crypto?.randomUUID?.() ?? `node_${Date.now()}`;
+      const result = apply(
+        [{ type: "add_node", nodeId, parentId, text: NEW_NODE_DEFAULT_TITLE }],
+        nodeId,
+      );
+      if (!result.ok) {
+        globalThis.alert(result.message);
+        return null;
+      }
+
+      commit(result.nextState);
+      setSelectedNodeId(nodeId);
+      setEditingNodeId(nodeId);
+      return nodeId;
+    },
+    [apply, commit],
+  );
+
+  const addSiblingForNode = useCallback(
+    (siblingId: string) => {
+      const current = stateRef.current;
+      const sibling = current?.nodesById[siblingId];
+      if (!sibling?.parentId) return null;
+
+      const nodeId = globalThis.crypto?.randomUUID?.() ?? `node_${Date.now()}`;
+      const result = apply(
+        [
+          {
+            type: "add_node",
+            nodeId,
+            parentId: sibling.parentId,
+            text: NEW_NODE_DEFAULT_TITLE,
+            index: sibling.orderIndex + 1,
+          },
+        ],
+        nodeId,
+      );
+      if (!result.ok) {
+        globalThis.alert(result.message);
+        return null;
+      }
+
+      commit(result.nextState);
+      setSelectedNodeId(nodeId);
+      setEditingNodeId(nodeId);
+      return nodeId;
+    },
+    [apply, commit],
+  );
+
+  const deleteNodeById = useCallback(
+    (nodeId: string) => {
+      const current = stateRef.current;
+      if (!current) return;
+      if (nodeId === current.rootNodeId) return;
+
+      const result = apply([{ type: "delete_node", nodeId }], current.rootNodeId);
+      if (!result.ok) return globalThis.alert(result.message);
+
+      commit(result.nextState);
+      setSelectedNodeId(result.nextSelectedNodeId);
+      setEditingNodeId(null);
+    },
+    [apply, commit],
+  );
+
+  const onAddChild = useCallback(() => {
+    const current = stateRef.current;
+    if (!current) return;
+    const parentId = selectedNodeId ?? current.rootNodeId;
+    addChildForNode(parentId);
+  }, [addChildForNode, selectedNodeId]);
+
+  const onAddSibling = useCallback(() => {
+    if (!selectedNodeId) return;
+    addSiblingForNode(selectedNodeId);
+  }, [addSiblingForNode, selectedNodeId]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const { target } = event;
@@ -463,34 +616,50 @@ export function MindmapEditor(props: MindmapEditorProps) {
         }
       }
 
-      if (
-        event.key === "Enter" &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.shiftKey
-      ) {
-        const currentSelectedNodeId = selectedNodeId;
-        if (!currentSelectedNodeId) return;
-        if (!stateRef.current?.nodesById[currentSelectedNodeId]) return;
-        event.preventDefault();
-        setInspectorOpen(true);
-        return;
-      }
+      if (editingNodeId) return;
 
-      const key = event.key.toLowerCase();
-      const mod = event.metaKey || event.ctrlKey;
-      if (!mod) return;
+      const action = getMindmapEditorKeyAction(event);
+      if (!action) return;
 
-      if (key === "z" && !event.shiftKey) {
-        event.preventDefault();
-        onUndo();
-        return;
-      }
+      const current = stateRef.current;
+      const currentSelectedNodeId = selectedNodeId;
 
-      if (key === "y" || (key === "z" && event.shiftKey)) {
-        event.preventDefault();
-        onRedo();
+      switch (action) {
+        case "undo": {
+          event.preventDefault();
+          onUndo();
+          return;
+        }
+        case "redo": {
+          event.preventDefault();
+          onRedo();
+          return;
+        }
+        case "edit_title": {
+          if (!currentSelectedNodeId) return;
+          if (!current?.nodesById[currentSelectedNodeId]) return;
+          event.preventDefault();
+          onRequestEditNodeId(currentSelectedNodeId);
+          return;
+        }
+        case "add_child": {
+          if (!current) return;
+          event.preventDefault();
+          const parentId = currentSelectedNodeId ?? current.rootNodeId;
+          addChildForNode(parentId);
+          return;
+        }
+        case "add_sibling": {
+          event.preventDefault();
+          if (!currentSelectedNodeId) return;
+          addSiblingForNode(currentSelectedNodeId);
+          return;
+        }
+        case "delete_selected": {
+          event.preventDefault();
+          if (!currentSelectedNodeId) return;
+          deleteNodeById(currentSelectedNodeId);
+        }
       }
     };
 
@@ -498,66 +667,16 @@ export function MindmapEditor(props: MindmapEditorProps) {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [onRedo, onUndo, selectedNodeId]);
-
-  const apply = useCallback(
-    (ops: Operation[], nextSelectedNodeId: string | null): EditorActionResult => {
-      try {
-        if (!state) {
-          return { ok: false, message: "Mindmap not loaded yet" };
-        }
-        const nextState = applyOperations(state, ops);
-        return { ok: true, nextState, nextSelectedNodeId };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Unknown error";
-        return { ok: false, message };
-      }
-    },
-    [state],
-  );
-
-  const onAddChild = useCallback(() => {
-    if (!state) return;
-    const parentId = selectedNodeId ?? state.rootNodeId;
-    const title = NEW_NODE_DEFAULT_TITLE;
-
-    const nodeId = globalThis.crypto?.randomUUID?.() ?? `node_${Date.now()}`;
-    const result = apply([{ type: "add_node", nodeId, parentId, text: title }], nodeId);
-    if (!result.ok) return globalThis.alert(result.message);
-
-    commit(result.nextState);
-    setSelectedNodeId(result.nextSelectedNodeId);
-  }, [apply, commit, selectedNodeId, state]);
-
-  const onAddSibling = useCallback(() => {
-    if (!state) return;
-    if (!selectedNodeId) return;
-    const selected = state.nodesById[selectedNodeId];
-    if (!selected) return;
-    if (!selected.parentId) {
-      return globalThis.alert("Cannot add sibling for root node");
-    }
-
-    const title = NEW_NODE_DEFAULT_TITLE;
-
-    const nodeId = globalThis.crypto?.randomUUID?.() ?? `node_${Date.now()}`;
-    const result = apply(
-      [
-        {
-          type: "add_node",
-          nodeId,
-          parentId: selected.parentId,
-          text: title,
-          index: selected.orderIndex + 1,
-        },
-      ],
-      nodeId,
-    );
-    if (!result.ok) return globalThis.alert(result.message);
-
-    commit(result.nextState);
-    setSelectedNodeId(result.nextSelectedNodeId);
-  }, [apply, commit, selectedNodeId, state]);
+  }, [
+    addChildForNode,
+    addSiblingForNode,
+    deleteNodeById,
+    editingNodeId,
+    onRedo,
+    onRequestEditNodeId,
+    onUndo,
+    selectedNodeId,
+  ]);
 
   const onMoveSibling = useCallback(
     (direction: "up" | "down") => {
@@ -665,25 +784,14 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const onOpenInspector = useCallback(() => {
     if (!selectedNodeId) return;
     if (!stateRef.current?.nodesById[selectedNodeId]) return;
+    setEditingNodeId(null);
     setInspectorOpen(true);
   }, [selectedNodeId]);
 
   const onDelete = useCallback(() => {
-    if (!state) return;
     if (!selectedNodeId) return;
-    if (selectedNodeId === state.rootNodeId) {
-      return globalThis.alert("Cannot delete root node");
-    }
-
-    const ok = globalThis.confirm("Delete selected node (and its subtree)?");
-    if (!ok) return;
-
-    const result = apply([{ type: "delete_node", nodeId: selectedNodeId }], state.rootNodeId);
-    if (!result.ok) return globalThis.alert(result.message);
-
-    commit(result.nextState);
-    setSelectedNodeId(result.nextSelectedNodeId);
-  }, [apply, commit, selectedNodeId, state]);
+    deleteNodeById(selectedNodeId);
+  }, [deleteNodeById, selectedNodeId]);
 
   const applyAIOperations = useCallback(
     (operations: Operation[]) => {
@@ -1141,7 +1249,11 @@ export function MindmapEditor(props: MindmapEditorProps) {
                 ref={canvasRef}
                 collapsedNodeIds={collapsedNodeIds}
                 editable
+                editingNodeId={editingNodeId}
+                onCancelEditNodeId={onCancelEditNodeId}
+                onCommitNodeTitle={onCommitNodeTitle}
                 onPersistNodePosition={onPersistNodePosition}
+                onRequestEditNodeId={onRequestEditNodeId}
                 onSelectNodeId={setSelectedNodeId}
                 selectedNodeId={selectedNodeId}
                 state={state}

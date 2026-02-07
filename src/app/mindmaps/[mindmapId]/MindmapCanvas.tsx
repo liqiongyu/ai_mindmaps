@@ -10,11 +10,13 @@ import {
   getViewportForBounds,
   useNodesState,
   type Node,
+  type NodeProps,
   type ReactFlowInstance,
 } from "@xyflow/react";
 import { toPng, toSvg } from "html-to-image";
 import {
   forwardRef,
+  memo,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -33,6 +35,114 @@ export type MindmapCanvasHandle = {
   exportSvg: (fileName: string) => Promise<ExportResult>;
 };
 
+type MindmapCanvasNodeData = {
+  label: string;
+  isEditing: boolean;
+  onRequestEditNodeId?: (nodeId: string) => void;
+  onCommitNodeTitle?: (args: { nodeId: string; title: string }) => { ok: true } | { ok: false };
+  onCancelEditNodeId?: (nodeId: string) => void;
+};
+
+type MindmapCanvasNode = Node<MindmapCanvasNodeData, "mindmapNode">;
+
+const MindmapNode = memo(function MindmapNode({
+  id,
+  data,
+  selected,
+}: NodeProps<MindmapCanvasNode>) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const skipNextBlurRef = useRef(false);
+
+  useEffect(() => {
+    if (!data.isEditing) return;
+    const handle = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [data.isEditing]);
+
+  const commit = useCallback((): { ok: true } | { ok: false; reason: "empty" | "rejected" } => {
+    const title = (inputRef.current?.value ?? data.label).trim();
+    if (!title) return { ok: false, reason: "empty" };
+
+    const result = data.onCommitNodeTitle?.({ nodeId: id, title });
+    if (result && !result.ok) return { ok: false, reason: "rejected" };
+    return { ok: true };
+  }, [data, id]);
+
+  if (data.isEditing) {
+    return (
+      <div
+        className={`rounded-md border bg-white px-3 py-2 shadow-sm dark:bg-zinc-950 ${
+          selected ? "border-zinc-900 dark:border-zinc-100" : "border-zinc-200 dark:border-zinc-800"
+        }`}
+      >
+        <input
+          className="w-full bg-transparent text-sm outline-none"
+          defaultValue={data.label}
+          onBlur={() => {
+            if (skipNextBlurRef.current) {
+              skipNextBlurRef.current = false;
+              return;
+            }
+            const result = commit();
+            if (!result.ok) {
+              if (result.reason === "empty") {
+                globalThis.alert("标题不能为空");
+              }
+              data.onCancelEditNodeId?.(id);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              skipNextBlurRef.current = true;
+              data.onCancelEditNodeId?.(id);
+              return;
+            }
+
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.stopPropagation();
+              skipNextBlurRef.current = true;
+              const result = commit();
+              if (!result.ok && result.reason === "empty") {
+                globalThis.alert("标题不能为空");
+              }
+              return;
+            }
+
+            if (event.key === "Tab") {
+              event.preventDefault();
+              event.stopPropagation();
+              return;
+            }
+          }}
+          ref={inputRef}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`rounded-md border bg-white px-3 py-2 text-sm shadow-sm dark:bg-zinc-950 ${
+        selected ? "border-zinc-900 dark:border-zinc-100" : "border-zinc-200 dark:border-zinc-800"
+      }`}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        data.onRequestEditNodeId?.(id);
+      }}
+    >
+      {data.label}
+    </div>
+  );
+});
+
+MindmapNode.displayName = "MindmapNode";
+
 export const MindmapCanvas = forwardRef(function MindmapCanvas(
   {
     state,
@@ -41,6 +151,10 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     collapsedNodeIds,
     editable = false,
     onPersistNodePosition,
+    editingNodeId,
+    onRequestEditNodeId,
+    onCommitNodeTitle,
+    onCancelEditNodeId,
   }: {
     state: MindmapState;
     selectedNodeId: string | null;
@@ -48,24 +162,45 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     collapsedNodeIds?: ReadonlySet<string>;
     editable?: boolean;
     onPersistNodePosition?: (args: { nodeId: string; x: number; y: number }) => void;
+    editingNodeId?: string | null;
+    onRequestEditNodeId?: (nodeId: string) => void;
+    onCommitNodeTitle?: (args: { nodeId: string; title: string }) => { ok: true } | { ok: false };
+    onCancelEditNodeId?: (nodeId: string) => void;
   },
   ref: ForwardedRef<MindmapCanvasHandle>,
 ) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const reactFlowInstanceRef = useRef<ReactFlowInstance<MindmapCanvasNode> | null>(null);
   const draggingRef = useRef(false);
 
   const { nodes: layoutNodes, edges } = useMemo(() => {
     const graph = mindmapStateToFlow(state, { collapsedNodeIds });
-    const nextNodes = graph.nodes.map((node): Node => {
+    const nextNodes = graph.nodes.map((node): MindmapCanvasNode => {
       return {
         ...node,
+        type: "mindmapNode",
         draggable: editable && node.id !== state.rootNodeId,
+        data: {
+          label: node.data.label,
+          isEditing: node.id === editingNodeId,
+          onRequestEditNodeId,
+          onCommitNodeTitle,
+          onCancelEditNodeId,
+        },
         selected: node.id === selectedNodeId,
       };
     });
     return { nodes: nextNodes, edges: graph.edges };
-  }, [collapsedNodeIds, editable, selectedNodeId, state]);
+  }, [
+    collapsedNodeIds,
+    editable,
+    editingNodeId,
+    onCancelEditNodeId,
+    onCommitNodeTitle,
+    onRequestEditNodeId,
+    selectedNodeId,
+    state,
+  ]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
 
@@ -197,6 +332,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
         nodesConnectable={false}
         nodesDraggable={editable}
         nodesFocusable
+        nodeTypes={{ mindmapNode: MindmapNode }}
         onNodeDragStart={editable ? onNodeDragStart : undefined}
         onNodeDragStop={editable ? onNodeDragStop : undefined}
         onNodesChange={editable ? onNodesChange : undefined}
