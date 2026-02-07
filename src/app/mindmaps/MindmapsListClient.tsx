@@ -23,7 +23,7 @@ export function MindmapsListClient({ initialMindmaps }: { initialMindmaps: Mindm
   return (
     <section className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-sm text-zinc-600 dark:text-zinc-300">{mindmaps.length} mindmaps</div>
+        <div className="text-sm text-zinc-600 dark:text-zinc-300">{mindmaps.length} 个导图</div>
         <button
           className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
           disabled={submitting}
@@ -43,14 +43,14 @@ export function MindmapsListClient({ initialMindmaps }: { initialMindmaps: Mindm
 
               if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
                 throw new Error(
-                  (json && "message" in json && json.message) || `Create failed (${res.status})`,
+                  (json && "message" in json && json.message) || `创建失败（${res.status}）`,
                 );
               }
 
               router.push(`/mindmaps/${json.mindmapId}`);
               router.refresh();
             } catch (err) {
-              const message = err instanceof Error ? err.message : "Create failed";
+              const message = err instanceof Error ? err.message : "创建失败";
               setError(message);
             } finally {
               setSubmitting(false);
@@ -58,25 +58,25 @@ export function MindmapsListClient({ initialMindmaps }: { initialMindmaps: Mindm
           }}
           type="button"
         >
-          {submitting ? "Creating…" : "New mindmap"}
+          {submitting ? "创建中…" : "新建导图"}
         </button>
       </div>
 
       {error ? (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200">
-          {error}
+          操作失败：{error}
         </div>
       ) : null}
 
       <div className="flex flex-col gap-2 text-sm">
         <Link className="underline" href="/mindmaps/demo">
-          Open demo editor
+          打开演示编辑器
         </Link>
       </div>
 
       {mindmaps.length === 0 ? (
         <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
-          No mindmaps yet. Create one to get started.
+          还没有导图。新建一个开始吧。
         </div>
       ) : (
         <ul className="divide-y divide-zinc-200 overflow-hidden rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
@@ -87,22 +87,20 @@ export function MindmapsListClient({ initialMindmaps }: { initialMindmaps: Mindm
                   {m.title}
                 </Link>
                 <div className="text-xs text-zinc-500">
-                  Updated: {new Date(m.updatedAt).toLocaleString()}
+                  更新于：{new Date(m.updatedAt).toLocaleString()}
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 {m.isPublic && m.publicSlug ? (
                   <Link className="text-xs underline" href={`/public/${m.publicSlug}`}>
-                    View share
+                    查看公开页
                   </Link>
                 ) : null}
                 <button
                   className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:text-red-200 dark:hover:bg-red-950/30"
                   disabled={submitting || deletingId === m.id}
                   onClick={async () => {
-                    const confirmed = window.confirm(
-                      `Delete "${m.title}"? This will permanently remove the mindmap.`,
-                    );
+                    const confirmed = window.confirm(`删除“${m.title}”？这将永久删除该导图。`);
                     if (!confirmed) return;
 
                     setDeletingId(m.id);
@@ -117,13 +115,13 @@ export function MindmapsListClient({ initialMindmaps }: { initialMindmaps: Mindm
                       if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
                         throw new Error(
                           (json && "message" in json && json.message) ||
-                            `Delete failed (${res.status})`,
+                            `删除失败（${res.status}）`,
                         );
                       }
 
                       router.refresh();
                     } catch (err) {
-                      const message = err instanceof Error ? err.message : "Delete failed";
+                      const message = err instanceof Error ? err.message : "删除失败";
                       setError(message);
                     } finally {
                       setDeletingId(null);
@@ -131,7 +129,7 @@ export function MindmapsListClient({ initialMindmaps }: { initialMindmaps: Mindm
                   }}
                   type="button"
                 >
-                  {deletingId === m.id ? "Deleting…" : "Delete"}
+                  {deletingId === m.id ? "删除中…" : "删除"}
                 </button>
               </div>
             </li>

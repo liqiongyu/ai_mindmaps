@@ -54,14 +54,14 @@ export function PublicMindmapViewer({
       <header className="flex h-14 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800">
         <div className="flex flex-col gap-0.5">
           <div className="text-sm font-medium">{title}</div>
-          <div className="text-xs text-zinc-500">Updated: {updatedLabel}</div>
+          <div className="text-xs text-zinc-500">更新于：{updatedLabel}</div>
         </div>
         <div className="flex items-center gap-3 text-sm">
           <Link className="underline" href="/">
-            Home
+            首页
           </Link>
           <Link className="underline" href="/login">
-            Log in
+            登录
           </Link>
         </div>
       </header>
@@ -105,7 +105,7 @@ export function PublicMindmapViewer({
       {mobileDrawerOpen && selectedNode ? (
         <div className="fixed inset-0 z-20 lg:hidden">
           <button
-            aria-label="Close notes drawer"
+            aria-label="关闭备注抽屉"
             className="absolute inset-0 bg-black/30"
             onClick={closeMobileDrawer}
             type="button"

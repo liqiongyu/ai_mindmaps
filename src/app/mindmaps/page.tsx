@@ -23,7 +23,7 @@ export default async function MindmapsPage() {
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-6 py-16">
       <header className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">My mindmaps</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">我的导图</h1>
           <div className="text-sm text-zinc-600 dark:text-zinc-300">{data.user.email}</div>
         </div>
         <SignOutButton />
@@ -31,7 +31,7 @@ export default async function MindmapsPage() {
 
       {mindmapsError ? (
         <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200">
-          Failed to load mindmaps: {mindmapsError.message}
+          加载失败：{mindmapsError.message}
         </div>
       ) : (
         <MindmapsListClient

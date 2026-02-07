@@ -26,7 +26,7 @@ export function SignOutButton() {
       }}
       type="button"
     >
-      {submitting ? "Signing out…" : "Sign out"}
+      {submitting ? "退出中…" : "退出"}
     </button>
   );
 }

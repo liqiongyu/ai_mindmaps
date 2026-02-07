@@ -12,6 +12,18 @@ type ChatMessage = {
   operations?: Operation[] | null;
 };
 
+function getRoleLabel(role: ChatMessage["role"]): string {
+  switch (role) {
+    case "assistant":
+      return "AI";
+    case "system":
+      return "系统";
+    case "user":
+    default:
+      return "用户";
+  }
+}
+
 function getThreadKey(scope: ChatScope, selectedNodeId: string | null): string | null {
   if (scope === "global") return "global";
   if (!selectedNodeId) return null;
@@ -94,8 +106,7 @@ export function MindmapChatSidebar({
 
         if (!res.ok || !json || json.ok !== true) {
           throw new Error(
-            (json && "message" in json && json.message) ||
-              `Failed to load chat history (${res.status})`,
+            (json && "message" in json && json.message) || `加载聊天记录失败（${res.status}）`,
           );
         }
 
@@ -118,7 +129,7 @@ export function MindmapChatSidebar({
         setMessagesByThreadKey((prev) => ({ ...prev, [threadKey]: nextMessages }));
       } catch (err) {
         if (controller.signal.aborted) return;
-        const message = err instanceof Error ? err.message : "Failed to load chat history";
+        const message = err instanceof Error ? err.message : "加载聊天记录失败";
         setError(message);
       } finally {
         setLoadingByThreadKey((prev) => ({ ...prev, [threadKey]: false }));
@@ -171,7 +182,7 @@ export function MindmapChatSidebar({
 
       if (!res.ok || !json || json.ok !== true) {
         throw new Error(
-          (json && "message" in json && json.message) || `AI request failed (${res.status})`,
+          (json && "message" in json && json.message) || `AI 请求失败（${res.status}）`,
         );
       }
 
@@ -188,7 +199,7 @@ export function MindmapChatSidebar({
         throw new Error(applyResult.message);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "AI request failed";
+      const message = err instanceof Error ? err.message : "AI 请求失败";
       setError(message);
     } finally {
       setSending(false);
@@ -199,7 +210,7 @@ export function MindmapChatSidebar({
     <aside className="flex w-96 shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-sm font-medium">Chat</div>
+          <div className="text-sm font-medium">AI</div>
           <div className="inline-flex overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800">
             <button
               className={`px-2 py-1 text-xs ${
@@ -210,7 +221,7 @@ export function MindmapChatSidebar({
               onClick={() => setScope("global")}
               type="button"
             >
-              Global
+              全局
             </button>
             <button
               className={`px-2 py-1 text-xs ${
@@ -221,22 +232,22 @@ export function MindmapChatSidebar({
               onClick={() => setScope("node")}
               type="button"
             >
-              Node
+              节点
             </button>
           </div>
         </div>
         <div className="mt-1 text-xs text-zinc-500">
           {scope === "global" ? (
-            <>AI can modify the whole mindmap.</>
+            <>AI 可以修改整张导图。</>
           ) : selectedNodeId ? (
             <>
-              Target:{" "}
+              目标：{" "}
               <span className="font-medium text-zinc-700 dark:text-zinc-200">
                 {selectedNodeLabel}
               </span>
             </>
           ) : (
-            <>Select a node to enable node-scoped chat.</>
+            <>请选择一个节点以启用节点模式。</>
           )}
         </div>
       </div>
@@ -244,18 +255,16 @@ export function MindmapChatSidebar({
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
         <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
           {historyLoading && messages.length === 0 ? (
-            <div className="text-sm text-zinc-600 dark:text-zinc-300">Loading chat history…</div>
+            <div className="text-sm text-zinc-600 dark:text-zinc-300">加载聊天记录中…</div>
           ) : messages.length === 0 ? (
             <div className="text-sm text-zinc-600 dark:text-zinc-300">
-              {scope === "global"
-                ? "Ask the AI to expand or improve this mindmap."
-                : "Ask the AI to expand this node subtree."}
+              {scope === "global" ? "让 AI 帮你扩展或优化这张导图。" : "让 AI 帮你扩展该节点子树。"}
             </div>
           ) : (
             messages.map((m, idx) => (
               <div className="flex flex-col gap-1" key={idx}>
                 <div className="text-[11px] font-medium tracking-wide text-zinc-500 uppercase">
-                  {m.role}
+                  {getRoleLabel(m.role)}
                 </div>
                 <div className="text-sm whitespace-pre-wrap text-zinc-900 dark:text-zinc-100">
                   {m.content}
@@ -282,7 +291,7 @@ export function MindmapChatSidebar({
 
         {error ? (
           <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200">
-            {error}
+            操作失败：{error}
           </div>
         ) : null}
 
@@ -292,7 +301,7 @@ export function MindmapChatSidebar({
             disabled={sending || nodeModeBlocked}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              nodeModeBlocked ? "Select a node to use node chat…" : "Describe what to add / change…"
+              nodeModeBlocked ? "请选择一个节点以使用节点模式…" : "描述你想新增/修改的内容…"
             }
             value={input}
           />
@@ -302,7 +311,7 @@ export function MindmapChatSidebar({
             onClick={onSend}
             type="button"
           >
-            {sending ? "Sending…" : "Send"}
+            {sending ? "发送中…" : "发送"}
           </button>
         </div>
       </div>

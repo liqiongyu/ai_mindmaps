@@ -18,10 +18,8 @@ export default function SignupPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 px-6 py-16">
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Sign up</h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-300">
-          Create an account to start saving mindmaps.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">注册</h1>
+        <p className="text-sm text-zinc-600 dark:text-zinc-300">创建账号以启用 AI 与云端保存。</p>
       </div>
 
       <form
@@ -39,7 +37,7 @@ export default function SignupPage() {
             router.push("/mindmaps");
             router.refresh();
           } catch (err) {
-            const message = err instanceof Error ? err.message : "Signup failed";
+            const message = err instanceof Error ? err.message : "注册失败";
             setError(message);
           } finally {
             setSubmitting(false);
@@ -47,7 +45,7 @@ export default function SignupPage() {
         }}
       >
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-zinc-700 dark:text-zinc-200">Email</span>
+          <span className="text-zinc-700 dark:text-zinc-200">邮箱</span>
           <input
             autoComplete="email"
             className="rounded-md border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-800 dark:focus:ring-zinc-700"
@@ -60,7 +58,7 @@ export default function SignupPage() {
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-zinc-700 dark:text-zinc-200">Password</span>
+          <span className="text-zinc-700 dark:text-zinc-200">密码</span>
           <input
             autoComplete="new-password"
             className="rounded-md border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-800 dark:focus:ring-zinc-700"
@@ -73,7 +71,7 @@ export default function SignupPage() {
 
         {error ? (
           <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200">
-            {error}
+            操作失败：{error}
           </div>
         ) : null}
 
@@ -82,13 +80,13 @@ export default function SignupPage() {
           disabled={submitting}
           type="submit"
         >
-          {submitting ? "Creating account…" : "Create account"}
+          {submitting ? "创建中…" : "创建账号"}
         </button>
 
         <div className="text-center text-sm text-zinc-600 dark:text-zinc-300">
-          Already have an account?{" "}
+          已有账号？{" "}
           <Link className="underline" href="/login">
-            Log in
+            登录
           </Link>
         </div>
       </form>
