@@ -8,7 +8,7 @@ import {
   AiChatRequestSchema,
 } from "@/lib/ai/chat";
 import { parseFirstJsonObject } from "@/lib/ai/json";
-import { applyOperations } from "@/lib/mindmap/ops";
+import { OperationSchema, applyOperations } from "@/lib/mindmap/ops";
 import { nodeRowsToMindmapState } from "@/lib/mindmap/storage";
 import { validateOperationsScope } from "@/lib/mindmap/scope";
 import { createAzureOpenAIClient, getAzureOpenAIConfigFromEnv } from "@/lib/llm/azureOpenAI";
@@ -42,15 +42,28 @@ const ChatThreadRowSchema = z.object({
   created_at: z.string(),
 });
 
-const ChatMessageRowSchema = z.object({
+const ChatMessageRowBaseSchema = z.object({
   id: z.string(),
-  role: z.enum(["user", "assistant", "system"]),
   content: z.string(),
-  operations: z.unknown().nullable(),
   provider: z.string().nullable(),
   model: z.string().nullable(),
   created_at: z.string(),
 });
+
+const ChatMessageRowSchema = z.discriminatedUnion("role", [
+  ChatMessageRowBaseSchema.extend({
+    role: z.literal("assistant"),
+    operations: z.array(OperationSchema),
+  }),
+  ChatMessageRowBaseSchema.extend({
+    role: z.literal("user"),
+    operations: z.null(),
+  }),
+  ChatMessageRowBaseSchema.extend({
+    role: z.literal("system"),
+    operations: z.null(),
+  }),
+]);
 
 async function getOrCreateThreadId({
   supabase,
