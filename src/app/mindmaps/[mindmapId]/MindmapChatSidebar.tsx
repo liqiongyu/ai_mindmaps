@@ -12,10 +12,15 @@ import { summarizeOperations } from "@/lib/mindmap/operationSummary";
 
 type ChatScope = "global" | "node";
 type ChatMessage = {
+  id?: string;
   role: "user" | "assistant" | "system";
   content: string;
   operations?: Operation[] | null;
   constraints?: AiChatConstraints;
+  provider?: string | null;
+  model?: string | null;
+  createdAt?: string;
+  rollbackToPresentId?: number;
 };
 
 const PROMPT_CHIPS: Array<{ label: string; template: string }> = [
@@ -50,11 +55,17 @@ export function MindmapChatSidebar({
   selectedNodeId,
   selectedNodeLabel,
   onApplyOperations,
+  onRollbackToPresentId,
 }: {
   mindmapId: string;
   selectedNodeId: string | null;
   selectedNodeLabel: string;
-  onApplyOperations: (operations: Operation[]) => { ok: true } | { ok: false; message: string };
+  onApplyOperations: (
+    operations: Operation[],
+  ) => { ok: true; rollbackToPresentId?: number } | { ok: false; message: string };
+  onRollbackToPresentId?: (
+    targetPresentId: number,
+  ) => { ok: true } | { ok: false; message: string };
 }) {
   const [scope, setScope] = useState<ChatScope>("global");
   const [messagesByThreadKey, setMessagesByThreadKey] = useState<Record<string, ChatMessage[]>>({});
@@ -66,6 +77,7 @@ export function MindmapChatSidebar({
   const [constraints, setConstraints] = useState<AiChatConstraints>(DEFAULT_AI_CHAT_CONSTRAINTS);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedOpsKey, setCopiedOpsKey] = useState<string | null>(null);
 
   useEffect(() => {
     setScope("global");
@@ -76,6 +88,7 @@ export function MindmapChatSidebar({
     setConstraints(DEFAULT_AI_CHAT_CONSTRAINTS);
     setError(null);
     setSending(false);
+    setCopiedOpsKey(null);
   }, [mindmapId]);
 
   const nodeModeBlocked = scope === "node" && !selectedNodeId;
@@ -113,9 +126,13 @@ export function MindmapChatSidebar({
           | {
               ok: true;
               messages: Array<{
+                id: string;
                 role: ChatMessage["role"];
                 content: string;
                 operations?: Operation[] | null;
+                provider?: string | null;
+                model?: string | null;
+                createdAt?: string;
               }>;
             }
           | { ok: false; message?: string }
@@ -136,10 +153,14 @@ export function MindmapChatSidebar({
                   typeof m.content === "string",
               )
               .map((m) => ({
+                id: m.id,
                 role: m.role,
                 content: m.content,
                 operations:
                   m.role === "assistant" && Array.isArray(m.operations) ? m.operations : null,
+                provider: m.provider ?? null,
+                model: m.model ?? null,
+                createdAt: m.createdAt,
               }))
           : [];
 
@@ -203,7 +224,13 @@ export function MindmapChatSidebar({
       });
 
       const json = (await res.json().catch(() => null)) as
-        | { ok: true; assistant_message: string; operations: Operation[] }
+        | {
+            ok: true;
+            assistant_message: string;
+            operations: Operation[];
+            provider?: string | null;
+            model?: string | null;
+          }
         | { ok: false; message?: string }
         | null;
 
@@ -211,6 +238,11 @@ export function MindmapChatSidebar({
         throw new Error(
           (json && "message" in json && json.message) || `AI 请求失败（${res.status}）`,
         );
+      }
+
+      const applyResult = onApplyOperations(json.operations);
+      if (!applyResult.ok) {
+        throw new Error(applyResult.message);
       }
 
       setMessagesByThreadKey((prev) => ({
@@ -222,14 +254,13 @@ export function MindmapChatSidebar({
             content: json.assistant_message,
             operations: json.operations,
             constraints: constraintsSnapshot,
+            provider: json.provider ?? null,
+            model: json.model ?? null,
+            createdAt: new Date().toISOString(),
+            rollbackToPresentId: applyResult.rollbackToPresentId,
           },
         ],
       }));
-
-      const applyResult = onApplyOperations(json.operations);
-      if (!applyResult.ok) {
-        throw new Error(applyResult.message);
-      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "AI 请求失败";
       setError(message);
@@ -294,10 +325,33 @@ export function MindmapChatSidebar({
             </div>
           ) : (
             messages.map((m, idx) => (
-              <div className="flex flex-col gap-1" key={idx}>
+              <div className="flex flex-col gap-1" key={m.id ?? idx}>
                 <div className="text-[11px] font-medium tracking-wide text-zinc-500 uppercase">
                   {getRoleLabel(m.role)}
                 </div>
+                {m.role === "assistant"
+                  ? (() => {
+                      const providerModel = [m.provider, m.model].filter(Boolean).join(" / ");
+                      const createdAt = m.createdAt
+                        ? (() => {
+                            try {
+                              return new Date(m.createdAt).toLocaleString();
+                            } catch {
+                              return m.createdAt;
+                            }
+                          })()
+                        : "";
+
+                      if (!providerModel && !createdAt) return null;
+                      return (
+                        <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                          {providerModel}
+                          {providerModel && createdAt ? " · " : null}
+                          {createdAt}
+                        </div>
+                      );
+                    })()
+                  : null}
                 <div className="text-sm whitespace-pre-wrap text-zinc-900 dark:text-zinc-100">
                   {m.content}
                 </div>
@@ -305,6 +359,63 @@ export function MindmapChatSidebar({
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">
                     {formatAiChatConstraintsSummary(m.constraints)}
                   </div>
+                ) : null}
+                {m.role === "assistant" && Array.isArray(m.operations) ? (
+                  <details className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-950/30">
+                    <summary className="cursor-pointer font-medium text-zinc-700 select-none dark:text-zinc-200">
+                      操作详情（ops）
+                    </summary>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+                        disabled={sending}
+                        onClick={async () => {
+                          const key = m.id ?? String(idx);
+                          try {
+                            await navigator.clipboard.writeText(
+                              JSON.stringify(m.operations, null, 2),
+                            );
+                            setCopiedOpsKey(key);
+                            setTimeout(() => {
+                              setCopiedOpsKey((current) => (current === key ? null : current));
+                            }, 1500);
+                          } catch {
+                            globalThis.alert("复制失败");
+                          }
+                        }}
+                        type="button"
+                      >
+                        {copiedOpsKey === (m.id ?? String(idx)) ? "已复制" : "复制 ops"}
+                      </button>
+                    </div>
+                    <pre className="mt-2 max-h-56 overflow-auto rounded-md border border-zinc-200 bg-white p-2 text-[11px] leading-relaxed text-zinc-900 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
+                      {JSON.stringify(m.operations, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
+                {m.role === "assistant" &&
+                typeof m.rollbackToPresentId === "number" &&
+                onRollbackToPresentId ? (
+                  <button
+                    className="mt-1 w-fit rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:bg-zinc-950 dark:text-red-200 dark:hover:bg-red-950/30"
+                    disabled={sending}
+                    onClick={() => {
+                      const targetPresentId = m.rollbackToPresentId;
+                      if (typeof targetPresentId !== "number") return;
+                      const confirmed = globalThis.confirm(
+                        "确定回滚到此条 AI 前？你可以使用撤销/重做恢复。",
+                      );
+                      if (!confirmed) return;
+                      setError(null);
+                      const result = onRollbackToPresentId(targetPresentId);
+                      if (!result.ok) {
+                        setError(result.message);
+                      }
+                    }}
+                    type="button"
+                  >
+                    回滚到此条 AI 前
+                  </button>
                 ) : null}
                 {m.role === "assistant" && m.operations && m.operations.length > 0
                   ? (() => {

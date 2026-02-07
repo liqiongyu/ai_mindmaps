@@ -14,7 +14,13 @@ import { makeMindmapExportFilename } from "@/lib/mindmap/export";
 import { getMindmapEditorKeyAction } from "@/lib/mindmap/keybindings";
 import { sampleMindmapState } from "@/lib/mindmap/sample";
 import type { History } from "@/lib/mindmap/history";
-import { commitHistory, createHistory, redoHistory, undoHistory } from "@/lib/mindmap/history";
+import {
+  commitHistory,
+  createHistory,
+  redoHistory,
+  travelHistoryToPresentId,
+  undoHistory,
+} from "@/lib/mindmap/history";
 import {
   deriveOperationHighlights,
   type OperationHighlightKind,
@@ -104,6 +110,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   });
 
   const inspectorOpenRef = useRef(inspectorOpen);
+  const historyRef = useRef<History<MindmapState> | null>(history);
   const stateRef = useRef<MindmapState | null>(state);
   const canvasRef = useRef<MindmapCanvasHandle | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -170,6 +177,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
   }, [selectedNode?.text, selectedNodeId]);
 
   useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
+
+  useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
@@ -230,6 +241,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     setCollapsedNodeIds(new Set());
     setSaveStatus("loading");
     setHistory(null);
+    historyRef.current = null;
     stateRef.current = null;
     pendingSaveRef.current = false;
     setSelectedNodeId(null);
@@ -269,7 +281,9 @@ export function MindmapEditor(props: MindmapEditorProps) {
         setCopied(false);
         skipNextSaveRef.current = true;
         stateRef.current = parsed.data;
-        setHistory(createHistory(parsed.data));
+        const nextHistory = createHistory(parsed.data);
+        historyRef.current = nextHistory;
+        setHistory(nextHistory);
         setSelectedNodeId(parsed.data.rootNodeId);
         setSaveStatus("saved");
       } catch (err) {
@@ -468,30 +482,32 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
   const commit = useCallback((nextState: MindmapState) => {
     stateRef.current = nextState;
-    setHistory((current) => {
-      if (!current) return createHistory(nextState);
-      return commitHistory(current, nextState, MAX_HISTORY_PAST);
-    });
+    const current = historyRef.current;
+    const next = current
+      ? commitHistory(current, nextState, MAX_HISTORY_PAST)
+      : createHistory(nextState);
+    historyRef.current = next;
+    setHistory(next);
   }, []);
 
   const onUndo = useCallback(() => {
-    setHistory((current) => {
-      if (!current) return current;
-      const next = undoHistory(current);
-      if (!next) return current;
-      stateRef.current = next.present;
-      return next;
-    });
+    const current = historyRef.current;
+    if (!current) return;
+    const next = undoHistory(current);
+    if (!next) return;
+    historyRef.current = next;
+    stateRef.current = next.present;
+    setHistory(next);
   }, []);
 
   const onRedo = useCallback(() => {
-    setHistory((current) => {
-      if (!current) return current;
-      const next = redoHistory(current);
-      if (!next) return current;
-      stateRef.current = next.present;
-      return next;
-    });
+    const current = historyRef.current;
+    if (!current) return;
+    const next = redoHistory(current);
+    if (!next) return;
+    historyRef.current = next;
+    stateRef.current = next.present;
+    setHistory(next);
   }, []);
 
   const apply = useCallback(
@@ -823,12 +839,46 @@ export function MindmapEditor(props: MindmapEditorProps) {
     deleteNodeById(selectedNodeId);
   }, [deleteNodeById, selectedNodeId]);
 
+  const rollbackToPresentId = useCallback((targetPresentId: number) => {
+    const current = historyRef.current;
+    if (!current) {
+      return { ok: false as const, message: "导图尚未加载" };
+    }
+
+    const next = travelHistoryToPresentId(current, targetPresentId);
+    if (!next) {
+      return {
+        ok: false as const,
+        message: "无法回滚：目标历史已被清理（撤销栈上限）",
+      };
+    }
+
+    historyRef.current = next;
+    stateRef.current = next.present;
+    setHistory(next);
+
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = null;
+    }
+    setHighlightByNodeId({});
+
+    return { ok: true as const };
+  }, []);
+
   const applyAIOperations = useCallback(
     (operations: Operation[]) => {
       const current = stateRef.current;
-      if (!current) {
+      const currentHistory = historyRef.current;
+      if (!current || !currentHistory) {
         return { ok: false as const, message: "导图尚未加载" };
       }
+
+      if (operations.length === 0) {
+        return { ok: true as const };
+      }
+
+      const rollbackToPresentId = currentHistory.presentId;
 
       try {
         const next = applyOperations(current, operations);
@@ -854,7 +904,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
           if (!currentSelected) return next.rootNodeId;
           return next.nodesById[currentSelected] ? currentSelected : next.rootNodeId;
         });
-        return { ok: true as const };
+        return { ok: true as const, rollbackToPresentId };
       } catch (err) {
         const message = err instanceof Error ? err.message : "应用改动失败";
         return { ok: false as const, message };
@@ -1373,6 +1423,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             <MindmapChatSidebar
               mindmapId={persistedMindmapId}
               onApplyOperations={applyAIOperations}
+              onRollbackToPresentId={rollbackToPresentId}
               selectedNodeId={selectedNodeId}
               selectedNodeLabel={selectedLabel}
             />
