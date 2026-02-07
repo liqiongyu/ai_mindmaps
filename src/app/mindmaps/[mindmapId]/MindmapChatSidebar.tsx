@@ -51,6 +51,10 @@ export function MindmapChatSidebar({
   const messages = threadKey ? (messagesByThreadKey[threadKey] ?? []) : [];
 
   useEffect(() => {
+    setError(null);
+  }, [threadKey]);
+
+  useEffect(() => {
     if (!threadKey || historyAttempted) return;
 
     const controller = new AbortController();
