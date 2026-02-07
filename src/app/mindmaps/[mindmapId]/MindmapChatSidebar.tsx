@@ -1,39 +1,71 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Operation } from "@/lib/mindmap/ops";
 
+type ChatScope = "global" | "node";
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
 export function MindmapChatSidebar({
   mindmapId,
+  selectedNodeId,
+  selectedNodeLabel,
   onApplyOperations,
 }: {
   mindmapId: string;
+  selectedNodeId: string | null;
+  selectedNodeLabel: string;
   onApplyOperations: (operations: Operation[]) => { ok: true } | { ok: false; message: string };
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [scope, setScope] = useState<ChatScope>("global");
+  const [messagesByScope, setMessagesByScope] = useState<Record<ChatScope, ChatMessage[]>>({
+    global: [],
+    node: [],
+  });
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSend = useMemo(() => input.trim().length > 0 && !sending, [input, sending]);
+  useEffect(() => {
+    setScope("global");
+    setMessagesByScope({ global: [], node: [] });
+    setInput("");
+    setError(null);
+    setSending(false);
+  }, [mindmapId]);
+
+  const messages = messagesByScope[scope];
+  const nodeModeBlocked = scope === "node" && !selectedNodeId;
+
+  const canSend = useMemo(() => {
+    if (nodeModeBlocked) return false;
+    return input.trim().length > 0 && !sending;
+  }, [input, nodeModeBlocked, sending]);
 
   const onSend = useCallback(async () => {
     const content = input.trim();
     if (!content) return;
+    if (scope === "node" && !selectedNodeId) return;
 
     setSending(true);
     setError(null);
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content }]);
+    setMessagesByScope((prev) => ({
+      ...prev,
+      [scope]: [...prev[scope], { role: "user", content }],
+    }));
 
     try {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mindmapId, scope: "global", userMessage: content }),
+        body: JSON.stringify({
+          mindmapId,
+          scope,
+          selectedNodeId: scope === "node" ? selectedNodeId : undefined,
+          userMessage: content,
+        }),
       });
 
       const json = (await res.json().catch(() => null)) as
@@ -47,7 +79,10 @@ export function MindmapChatSidebar({
         );
       }
 
-      setMessages((prev) => [...prev, { role: "assistant", content: json.assistant_message }]);
+      setMessagesByScope((prev) => ({
+        ...prev,
+        [scope]: [...prev[scope], { role: "assistant", content: json.assistant_message }],
+      }));
 
       const applyResult = onApplyOperations(json.operations);
       if (!applyResult.ok) {
@@ -59,20 +94,61 @@ export function MindmapChatSidebar({
     } finally {
       setSending(false);
     }
-  }, [input, mindmapId, onApplyOperations]);
+  }, [input, mindmapId, onApplyOperations, scope, selectedNodeId]);
 
   return (
     <aside className="flex w-96 shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-        <div className="text-sm font-medium">Global chat</div>
-        <div className="text-xs text-zinc-500">AI updates the mindmap via ops</div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-medium">Chat</div>
+          <div className="inline-flex overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800">
+            <button
+              className={`px-2 py-1 text-xs ${
+                scope === "global"
+                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  : "bg-transparent text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              }`}
+              onClick={() => setScope("global")}
+              type="button"
+            >
+              Global
+            </button>
+            <button
+              className={`px-2 py-1 text-xs ${
+                scope === "node"
+                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  : "bg-transparent text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              }`}
+              onClick={() => setScope("node")}
+              type="button"
+            >
+              Node
+            </button>
+          </div>
+        </div>
+        <div className="mt-1 text-xs text-zinc-500">
+          {scope === "global" ? (
+            <>AI can modify the whole mindmap.</>
+          ) : selectedNodeId ? (
+            <>
+              Target:{" "}
+              <span className="font-medium text-zinc-700 dark:text-zinc-200">
+                {selectedNodeLabel}
+              </span>
+            </>
+          ) : (
+            <>Select a node to enable node-scoped chat.</>
+          )}
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
         <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
           {messages.length === 0 ? (
             <div className="text-sm text-zinc-600 dark:text-zinc-300">
-              Ask the AI to expand or improve this mindmap.
+              {scope === "global"
+                ? "Ask the AI to expand or improve this mindmap."
+                : "Ask the AI to expand this node subtree."}
             </div>
           ) : (
             messages.map((m, idx) => (
@@ -97,9 +173,11 @@ export function MindmapChatSidebar({
         <div className="flex flex-col gap-2">
           <textarea
             className="h-24 resize-none rounded-md border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-300 disabled:opacity-50 dark:border-zinc-800 dark:focus:ring-zinc-700"
-            disabled={sending}
+            disabled={sending || nodeModeBlocked}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Describe what to add / change…"
+            placeholder={
+              nodeModeBlocked ? "Select a node to use node chat…" : "Describe what to add / change…"
+            }
             value={input}
           />
           <button
