@@ -22,42 +22,70 @@ export function mindmapStateToFlow(
   options?: { collapsedNodeIds?: ReadonlySet<string> },
 ): MindmapFlowGraph {
   const childrenByParentId = indexChildren(state.nodesById);
-  const root = hierarchy<TreeNode>(
-    buildTree(state.rootNodeId, childrenByParentId, options?.collapsedNodeIds),
-  );
+  const rootTree = buildTree(state.rootNodeId, childrenByParentId, options?.collapsedNodeIds);
+  const rootChildren = rootTree.children ?? [];
 
-  const layout = tree<TreeNode>().nodeSize([100, 260]);
-  const laidOut = layout(root);
-
-  const descendants = laidOut.descendants();
-  const minX = Math.min(...descendants.map((d) => d.y));
-  const minY = Math.min(...descendants.map((d) => d.x));
-
-  const nodes: Node<MindmapFlowNodeData>[] = descendants.map((d) => {
-    const node = state.nodesById[d.data.id];
-    if (!node) throw new Error(`Node not found: ${d.data.id}`);
-
-    return {
-      id: d.data.id,
-      type: "default",
-      data: { label: node.text },
-      position: { x: d.y - minX, y: d.x - minY },
-    };
+  const leftChildren: TreeNode[] = [];
+  const rightChildren: TreeNode[] = [];
+  rootChildren.forEach((child, index) => {
+    if (index % 2 === 0) {
+      rightChildren.push(child);
+      return;
+    }
+    leftChildren.push(child);
   });
 
-  const edges: Edge[] = descendants.flatMap((d) => {
-    if (!d.parent) return [];
-    return [
-      {
+  const layout = tree<TreeNode>().nodeSize([100, 260]);
+  const leftLaidOut = layout(hierarchy<TreeNode>({ id: state.rootNodeId, children: leftChildren }));
+  const rightLaidOut = layout(
+    hierarchy<TreeNode>({ id: state.rootNodeId, children: rightChildren }),
+  );
+
+  const positionsById = new Map<string, { x: number; y: number }>();
+  const edgesById = new Map<string, Edge>();
+
+  const addSide = (args: { side: "left" | "right"; root: ReturnType<typeof layout> }) => {
+    const { side, root } = args;
+    const xMultiplier = side === "left" ? -1 : 1;
+    const yOffset = -root.x;
+
+    for (const d of root.descendants()) {
+      const node = state.nodesById[d.data.id];
+      if (!node) throw new Error(`Node not found: ${d.data.id}`);
+
+      positionsById.set(d.data.id, { x: xMultiplier * d.y, y: d.x + yOffset });
+
+      if (!d.parent) continue;
+      const edge: Edge = {
         id: `e-${d.parent.data.id}-${d.data.id}`,
         source: d.parent.data.id,
         target: d.data.id,
         type: "smoothstep",
-      },
-    ];
+      };
+      edgesById.set(edge.id, edge);
+    }
+  };
+
+  addSide({ side: "left", root: leftLaidOut });
+  addSide({ side: "right", root: rightLaidOut });
+
+  const positions = [...positionsById.values()];
+  const minX = Math.min(...positions.map((p) => p.x));
+  const minY = Math.min(...positions.map((p) => p.y));
+
+  const nodes: Node<MindmapFlowNodeData>[] = [...positionsById.entries()].map(([id, pos]) => {
+    const node = state.nodesById[id];
+    if (!node) throw new Error(`Node not found: ${id}`);
+
+    return {
+      id,
+      type: "default",
+      data: { label: node.text },
+      position: { x: pos.x - minX, y: pos.y - minY },
+    };
   });
 
-  return { nodes, edges };
+  return { nodes, edges: [...edgesById.values()] };
 }
 
 function indexChildren(nodesById: Record<string, MindmapNode>): Record<string, MindmapNode[]> {
