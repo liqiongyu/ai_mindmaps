@@ -42,11 +42,13 @@ export function PublicMindmapViewer({
         </div>
       </header>
 
-      <MindmapCanvas
-        onSelectNodeId={setSelectedNodeId}
-        selectedNodeId={selectedNodeId}
-        state={state}
-      />
+      <div className="min-h-0 flex-1">
+        <MindmapCanvas
+          onSelectNodeId={setSelectedNodeId}
+          selectedNodeId={selectedNodeId}
+          state={state}
+        />
+      </div>
     </main>
   );
 }

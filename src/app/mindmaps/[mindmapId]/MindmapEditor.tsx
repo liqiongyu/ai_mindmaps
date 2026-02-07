@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { MindmapChatSidebar } from "./MindmapChatSidebar";
 import { MindmapCanvas } from "./MindmapCanvas";
 
 import type { MindmapState, Operation } from "@/lib/mindmap/ops";
@@ -34,6 +35,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const [shareError, setShareError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const stateRef = useRef<MindmapState | null>(state);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSeqRef = useRef(0);
   const skipNextSaveRef = useRef(false);
@@ -44,6 +46,10 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     if (!selectedNodeId) return "none";
     return selectedNode?.text ?? selectedNodeId;
   }, [selectedNode?.text, selectedNodeId]);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   useEffect(() => {
     if (!persistedMindmapId) return;
@@ -216,6 +222,26 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSelectedNodeId(result.nextSelectedNodeId);
   }, [apply, selectedNodeId, state]);
 
+  const applyAIOperations = useCallback((operations: Operation[]) => {
+    const current = stateRef.current;
+    if (!current) {
+      return { ok: false as const, message: "Mindmap not loaded yet" };
+    }
+
+    try {
+      const next = applyOperations(current, operations);
+      setState(next);
+      setSelectedNodeId((currentSelected) => {
+        if (!currentSelected) return next.rootNodeId;
+        return next.nodesById[currentSelected] ? currentSelected : next.rootNodeId;
+      });
+      return { ok: true as const };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to apply operations";
+      return { ok: false as const, message };
+    }
+  }, []);
+
   const onShare = useCallback(async () => {
     if (!persistedMindmapId) return;
     setSharing(true);
@@ -317,7 +343,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
       </header>
 
       {loadError ? (
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-6 py-10">
+        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 px-6 py-10">
           <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200">
             Failed to load mindmap: {loadError}
           </div>
@@ -326,50 +352,60 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
           </Link>
         </div>
       ) : !state ? (
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-6 py-10">
+        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 px-6 py-10">
           <div className="text-sm text-zinc-600 dark:text-zinc-300">Loading…</div>
         </div>
       ) : (
-        <>
-          {shareError ? (
-            <div className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200">
-              Share failed: {shareError}
-            </div>
-          ) : null}
-          {shareUrl ? (
-            <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <a className="underline" href={shareUrl} rel="noreferrer" target="_blank">
-                  {shareUrl}
-                </a>
-                <button
-                  className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] hover:bg-white dark:border-zinc-800 dark:hover:bg-zinc-900"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(shareUrl);
-                      setCopied(true);
-                    } catch {
-                      setCopied(false);
-                    }
-                  }}
-                  type="button"
-                >
-                  {copied ? "Copied" : "Copy link"}
-                </button>
+        <div className="flex flex-1">
+          <div className="flex min-h-0 flex-1 flex-col">
+            {shareError ? (
+              <div className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200">
+                Share failed: {shareError}
               </div>
+            ) : null}
+            {shareUrl ? (
+              <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <a className="underline" href={shareUrl} rel="noreferrer" target="_blank">
+                    {shareUrl}
+                  </a>
+                  <button
+                    className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] hover:bg-white dark:border-zinc-800 dark:hover:bg-zinc-900"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(shareUrl);
+                        setCopied(true);
+                      } catch {
+                        setCopied(false);
+                      }
+                    }}
+                    type="button"
+                  >
+                    {copied ? "Copied" : "Copy link"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {saveError ? (
+              <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
+                Save failed: {saveError}
+              </div>
+            ) : null}
+            <div className="min-h-0 flex-1">
+              <MindmapCanvas
+                onSelectNodeId={setSelectedNodeId}
+                selectedNodeId={selectedNodeId}
+                state={state}
+              />
             </div>
+          </div>
+          {persistedMindmapId ? (
+            <MindmapChatSidebar
+              mindmapId={persistedMindmapId}
+              onApplyOperations={applyAIOperations}
+            />
           ) : null}
-          {saveError ? (
-            <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
-              Save failed: {saveError}
-            </div>
-          ) : null}
-          <MindmapCanvas
-            onSelectNodeId={setSelectedNodeId}
-            selectedNodeId={selectedNodeId}
-            state={state}
-          />
-        </>
+        </div>
       )}
     </main>
   );
