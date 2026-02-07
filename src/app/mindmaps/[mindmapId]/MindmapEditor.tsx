@@ -45,6 +45,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const [exporting, setExporting] = useState<"png" | "svg" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(() => new Set());
 
   const stateRef = useRef<MindmapState | null>(state);
   const canvasRef = useRef<MindmapCanvasHandle | null>(null);
@@ -95,6 +96,15 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const canIndent = canMoveUp;
   const canOutdent = outdentContext !== null;
 
+  const selectedHasChildren = useMemo(() => {
+    if (!state) return false;
+    if (!selectedNodeId) return false;
+    return Object.values(state.nodesById).some((node) => node.parentId === selectedNodeId);
+  }, [selectedNodeId, state]);
+
+  const selectedIsCollapsed = selectedNodeId ? collapsedNodeIds.has(selectedNodeId) : false;
+  const canToggleCollapse = Boolean(selectedNodeId) && (selectedIsCollapsed || selectedHasChildren);
+
   const selectedLabel = useMemo(() => {
     if (!selectedNodeId) return "none";
     return selectedNode?.text ?? selectedNodeId;
@@ -113,6 +123,23 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   }, [state]);
 
   useEffect(() => {
+    if (!state) return;
+    setCollapsedNodeIds((current) => {
+      if (current.size === 0) return current;
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of current) {
+        if (state.nodesById[id]) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [state]);
+
+  useEffect(() => {
     if (!persistedMindmapId) return;
 
     let cancelled = false;
@@ -125,6 +152,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setExportError(null);
     setExporting(null);
     setInspectorOpen(false);
+    setCollapsedNodeIds(new Set());
     setSaveStatus("loading");
     setHistory(null);
     stateRef.current = null;
@@ -471,6 +499,26 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSelectedNodeId(result.nextSelectedNodeId);
   }, [apply, commit, selectedNodeId, state]);
 
+  const onToggleCollapse = useCallback(() => {
+    if (!state) return;
+    if (!selectedNodeId) return;
+    const hasChildren = Object.values(state.nodesById).some(
+      (node) => node.parentId === selectedNodeId,
+    );
+
+    setCollapsedNodeIds((current) => {
+      if (current.has(selectedNodeId)) {
+        const next = new Set(current);
+        next.delete(selectedNodeId);
+        return next;
+      }
+      if (!hasChildren) return current;
+      const next = new Set(current);
+      next.add(selectedNodeId);
+      return next;
+    });
+  }, [selectedNodeId, state]);
+
   const onOpenInspector = useCallback(() => {
     if (!selectedNodeId) return;
     if (!stateRef.current?.nodesById[selectedNodeId]) return;
@@ -722,6 +770,14 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            disabled={!state || !canToggleCollapse}
+            onClick={onToggleCollapse}
+            type="button"
+          >
+            {selectedIsCollapsed ? "Expand" : "Collapse"}
+          </button>
+          <button
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
             disabled={!state || !selectedNodeId}
             onClick={onOpenInspector}
             type="button"
@@ -822,6 +878,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
             <div className="min-h-0 flex-1">
               <MindmapCanvas
                 ref={canvasRef}
+                collapsedNodeIds={collapsedNodeIds}
                 onSelectNodeId={setSelectedNodeId}
                 selectedNodeId={selectedNodeId}
                 state={state}

@@ -35,10 +35,12 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     state,
     selectedNodeId,
     onSelectNodeId,
+    collapsedNodeIds,
   }: {
     state: MindmapState;
     selectedNodeId: string | null;
     onSelectNodeId: (nodeId: string | null) => void;
+    collapsedNodeIds?: ReadonlySet<string>;
   },
   ref: ForwardedRef<MindmapCanvasHandle>,
 ) {
@@ -46,12 +48,12 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
 
   const { nodes, edges } = useMemo(() => {
-    const graph = mindmapStateToFlow(state);
+    const graph = mindmapStateToFlow(state, { collapsedNodeIds });
     const nextNodes = graph.nodes.map((node): Node => {
       return { ...node, selected: node.id === selectedNodeId };
     });
     return { nodes: nextNodes, edges: graph.edges };
-  }, [selectedNodeId, state]);
+  }, [collapsedNodeIds, selectedNodeId, state]);
 
   const exportWith = useCallback(
     async (format: "png" | "svg", fileName: string): Promise<ExportResult> => {
