@@ -15,12 +15,14 @@ Set these in `.env.local` (see `.env.example`):
 2. Create a new query
 3. Paste the contents of:
    - `supabase/migrations/20260207000000_mindmap_storage.sql`
+   - `supabase/migrations/20260207010000_mma_atomic_save.sql`
 4. Run the query
 
 After this, the project has:
 
 - `mindmaps` table
 - `mindmap_nodes` table
+- `mma_replace_mindmap_nodes(...)` RPC for atomic saves
 - RLS policies (owner-only CRUD; public read when `is_public=true`)
 
 ## Sanity check
