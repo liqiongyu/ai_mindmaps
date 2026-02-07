@@ -32,7 +32,6 @@ create table if not exists public.mindmaps (
 );
 
 create index if not exists mindmaps_owner_id_idx on public.mindmaps (owner_id);
-create index if not exists mindmaps_public_slug_idx on public.mindmaps (public_slug);
 
 drop trigger if exists set_mindmaps_updated_at on public.mindmaps;
 create trigger set_mindmaps_updated_at
