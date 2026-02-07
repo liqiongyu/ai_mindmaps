@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MindmapChatSidebar } from "./MindmapChatSidebar";
-import { MindmapCanvas } from "./MindmapCanvas";
+import { MindmapCanvas, type MindmapCanvasHandle } from "./MindmapCanvas";
 
 import type { MindmapState, Operation } from "@/lib/mindmap/ops";
 import { applyOperations } from "@/lib/mindmap/ops";
+import { makeMindmapExportFilename } from "@/lib/mindmap/export";
 import { sampleMindmapState } from "@/lib/mindmap/sample";
 import type { History } from "@/lib/mindmap/history";
 import { commitHistory, createHistory, redoHistory, undoHistory } from "@/lib/mindmap/history";
@@ -40,8 +41,11 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState<"png" | "svg" | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const stateRef = useRef<MindmapState | null>(state);
+  const canvasRef = useRef<MindmapCanvasHandle | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSeqRef = useRef(0);
   const skipNextSaveRef = useRef(false);
@@ -75,6 +79,8 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setShareError(null);
     setCopied(false);
     setSharing(false);
+    setExportError(null);
+    setExporting(null);
     setSaveStatus("loading");
     setHistory(null);
     stateRef.current = null;
@@ -354,6 +360,33 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     }
   }, [persistedMindmapId]);
 
+  const onExport = useCallback(
+    async (format: "png" | "svg") => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        setExportError("Canvas not ready yet");
+        return;
+      }
+
+      setExporting(format);
+      setExportError(null);
+      try {
+        const fileName = makeMindmapExportFilename({ format, mindmapId: persistedMindmapId });
+        const result =
+          format === "png" ? await canvas.exportPng(fileName) : await canvas.exportSvg(fileName);
+        if (!result.ok) {
+          throw new Error(result.message);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Export failed";
+        setExportError(message);
+      } finally {
+        setExporting(null);
+      }
+    },
+    [persistedMindmapId],
+  );
+
   const statusLabel = useMemo(() => {
     if (props.mode === "demo") return "Demo";
     switch (saveStatus) {
@@ -437,6 +470,22 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
               {sharing ? "Sharing…" : shareUrl ? "Refresh link" : "Share"}
             </button>
           ) : null}
+          <button
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            disabled={!state || exporting !== null}
+            onClick={() => onExport("png")}
+            type="button"
+          >
+            {exporting === "png" ? "Exporting…" : "Export PNG"}
+          </button>
+          <button
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            disabled={!state || exporting !== null}
+            onClick={() => onExport("svg")}
+            type="button"
+          >
+            {exporting === "svg" ? "Exporting…" : "Export SVG"}
+          </button>
         </div>
       </header>
 
@@ -489,8 +538,14 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
                 Save failed: {saveError}
               </div>
             ) : null}
+            {exportError ? (
+              <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
+                Export failed: {exportError}
+              </div>
+            ) : null}
             <div className="min-h-0 flex-1">
               <MindmapCanvas
+                ref={canvasRef}
                 onSelectNodeId={setSelectedNodeId}
                 selectedNodeId={selectedNodeId}
                 state={state}
