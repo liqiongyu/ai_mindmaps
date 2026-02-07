@@ -61,6 +61,7 @@ export function mindmapStateToFlow(
         source: d.parent.data.id,
         target: d.data.id,
         type: "smoothstep",
+        style: { stroke: "#64748b", strokeWidth: 2 },
       };
       edgesById.set(edge.id, edge);
     }
