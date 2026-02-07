@@ -46,11 +46,11 @@ export function MindmapNodeInspectorModal({
       if (!result.ok) {
         throw new Error(result.message);
       }
+      setSaving(false);
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Save failed";
       setError(message);
-    } finally {
       setSaving(false);
     }
   }, [nodeId, notes, onClose, onSave, title]);
