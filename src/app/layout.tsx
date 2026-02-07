@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MindMaps AI (MMA)",
-  description: "AI 对话式思维导图工具（MVP scaffold）",
+  title: "MindMaps AI",
+  description: "对话生成“可控”的思维导图：ops 可校验、可撤销。",
 };
 
 export default function RootLayout({
