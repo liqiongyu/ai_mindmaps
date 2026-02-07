@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-6 py-16">
@@ -7,6 +9,9 @@ export default function Home() {
         Supabase 持久化与 AI ops 协议。
       </p>
       <div className="flex flex-col gap-2 text-sm">
+        <Link className="underline" href="/mindmaps/demo">
+          /mindmaps/demo（编辑器 demo）
+        </Link>
         <a className="underline" href="/api/ai/chat">
           /api/ai/chat（占位）
         </a>
