@@ -33,7 +33,7 @@ type EditorActionResult =
 type SaveStatus = "idle" | "loading" | "saving" | "saved" | "error";
 
 const MAX_HISTORY_PAST = 50;
-const NEW_NODE_DEFAULT_TITLE = "New node";
+const NEW_NODE_DEFAULT_TITLE = "新节点";
 
 type MindmapEditorProps =
   | { mode: "demo" }
@@ -165,7 +165,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const canToggleCollapse = Boolean(selectedNodeId) && (selectedIsCollapsed || selectedHasChildren);
 
   const selectedLabel = useMemo(() => {
-    if (!selectedNodeId) return "none";
+    if (!selectedNodeId) return "无";
     return selectedNode?.text ?? selectedNodeId;
   }, [selectedNode?.text, selectedNodeId]);
 
@@ -248,13 +248,13 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
         if (!res.ok || !json || json.ok !== true) {
           throw new Error(
-            (json && "message" in json && json.message) || `Load failed (${res.status})`,
+            (json && "message" in json && json.message) || `加载失败（${res.status}）`,
           );
         }
 
         const parsed = MindmapStateSchema.safeParse(json.state);
         if (!parsed.success) {
-          throw new Error("Loaded mindmap state is invalid");
+          throw new Error("导图数据格式无效");
         }
 
         if (cancelled) return;
@@ -274,7 +274,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         setSaveStatus("saved");
       } catch (err) {
         if (cancelled) return;
-        const message = err instanceof Error ? err.message : "Load failed";
+        const message = err instanceof Error ? err.message : "加载失败";
         setLoadError(message);
         setSaveStatus("error");
       }
@@ -319,7 +319,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         if (saveSeqRef.current !== seq) return;
         if (!res.ok || !json || json.ok !== true) {
           throw new Error(
-            (json && "message" in json && json.message) || `Save failed (${res.status})`,
+            (json && "message" in json && json.message) || `保存失败（${res.status}）`,
           );
         }
 
@@ -328,7 +328,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         setSaveError(null);
       } catch (err) {
         if (saveSeqRef.current !== seq) return;
-        const message = err instanceof Error ? err.message : "Save failed";
+        const message = err instanceof Error ? err.message : "保存失败";
         setSaveStatus("error");
         setSaveError(message);
       }
@@ -365,7 +365,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     } catch (err) {
       pendingSaveRef.current = false;
       tryDraftJsonRef.current = null;
-      const message = err instanceof Error ? err.message : "Local save failed";
+      const message = err instanceof Error ? err.message : "本地保存失败";
       setSaveStatus("error");
       setSaveError(message);
       return;
@@ -382,7 +382,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         setSaveStatus("saved");
         setSaveError(null);
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Local save failed";
+        const message = err instanceof Error ? err.message : "本地保存失败";
         setSaveStatus("error");
         setSaveError(message);
       }
@@ -498,14 +498,14 @@ export function MindmapEditor(props: MindmapEditorProps) {
     (ops: Operation[], nextSelectedNodeId: string | null): EditorActionResult => {
       const current = stateRef.current;
       if (!current) {
-        return { ok: false, message: "Mindmap not loaded yet" };
+        return { ok: false, message: "导图尚未加载" };
       }
 
       try {
         const nextState = applyOperations(current, ops);
         return { ok: true, nextState, nextSelectedNodeId };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Unknown error";
+        const message = err instanceof Error ? err.message : "未知错误";
         return { ok: false, message };
       }
     },
@@ -546,7 +546,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         setEditingNodeId((currentEditing) => (currentEditing === nodeId ? null : currentEditing));
         return { ok: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to rename node";
+        const message = err instanceof Error ? err.message : "重命名失败";
         globalThis.alert(message);
         return { ok: false };
       }
@@ -827,7 +827,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     (operations: Operation[]) => {
       const current = stateRef.current;
       if (!current) {
-        return { ok: false as const, message: "Mindmap not loaded yet" };
+        return { ok: false as const, message: "导图尚未加载" };
       }
 
       try {
@@ -856,7 +856,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         });
         return { ok: true as const };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to apply operations";
+        const message = err instanceof Error ? err.message : "应用改动失败";
         return { ok: false as const, message };
       }
     },
@@ -867,17 +867,17 @@ export function MindmapEditor(props: MindmapEditorProps) {
     async ({ nodeId, title, notes }: { nodeId: string; title: string; notes: string }) => {
       const current = stateRef.current;
       if (!current) {
-        return { ok: false as const, message: "Mindmap not loaded yet" };
+        return { ok: false as const, message: "导图尚未加载" };
       }
 
       const node = current.nodesById[nodeId];
       if (!node) {
-        return { ok: false as const, message: "Node not found" };
+        return { ok: false as const, message: "未找到该节点" };
       }
 
       const nextTitle = title.trim();
       if (!nextTitle) {
-        return { ok: false as const, message: "Title is required" };
+        return { ok: false as const, message: "标题不能为空" };
       }
 
       const operations: Operation[] = [];
@@ -900,7 +900,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         setSelectedNodeId(next.nodesById[nodeId] ? nodeId : next.rootNodeId);
         return { ok: true as const };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to apply node edits";
+        const message = err instanceof Error ? err.message : "保存失败";
         return { ok: false as const, message };
       }
     },
@@ -920,9 +920,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         | null;
 
       if (!res.ok || !json || json.ok !== true) {
-        throw new Error(
-          (json && "message" in json && json.message) || `Share failed (${res.status})`,
-        );
+        throw new Error((json && "message" in json && json.message) || `分享失败（${res.status}）`);
       }
 
       const url = new URL(`/public/${json.publicSlug}`, window.location.origin).toString();
@@ -935,7 +933,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         // Clipboard not available; user can copy manually.
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Share failed";
+      const message = err instanceof Error ? err.message : "分享失败";
       setShareError(message);
     } finally {
       setSharing(false);
@@ -961,13 +959,13 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
       if (!res.ok || !json || json.ok !== true) {
         throw new Error(
-          (json && "message" in json && json.message) || `Stop sharing failed (${res.status})`,
+          (json && "message" in json && json.message) || `停止分享失败（${res.status}）`,
         );
       }
 
       setShareUrl(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Stop sharing failed";
+      const message = err instanceof Error ? err.message : "停止分享失败";
       setShareError(message);
     } finally {
       setStoppingShare(false);
@@ -976,7 +974,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
   const onDeleteMindmap = useCallback(async () => {
     if (!persistedMindmapId) return;
-    const confirmed = window.confirm("Delete this mindmap? This cannot be undone.");
+    const confirmed = window.confirm("确定删除该导图？此操作无法撤销。");
     if (!confirmed) return;
 
     setDeletingMindmap(true);
@@ -989,15 +987,13 @@ export function MindmapEditor(props: MindmapEditorProps) {
         | null;
 
       if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
-        throw new Error(
-          (json && "message" in json && json.message) || `Delete failed (${res.status})`,
-        );
+        throw new Error((json && "message" in json && json.message) || `删除失败（${res.status}）`);
       }
 
       router.push("/mindmaps");
       router.refresh();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Delete failed";
+      const message = err instanceof Error ? err.message : "删除失败";
       setDeleteMindmapError(message);
     } finally {
       setDeletingMindmap(false);
@@ -1021,11 +1017,11 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
         if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
           throw new Error(
-            (json && "message" in json && json.message) || `Position save failed (${res.status})`,
+            (json && "message" in json && json.message) || `位置保存失败（${res.status}）`,
           );
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Position save failed";
+        const message = err instanceof Error ? err.message : "位置保存失败";
         setPositionSaveError(message);
       }
     },
@@ -1036,7 +1032,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     async (format: "png" | "svg") => {
       const canvas = canvasRef.current;
       if (!canvas) {
-        setExportError("Canvas not ready yet");
+        setExportError("画布尚未就绪");
         return;
       }
 
@@ -1050,7 +1046,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
           throw new Error(result.message);
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Export failed";
+        const message = err instanceof Error ? err.message : "导出失败";
         setExportError(message);
       } finally {
         setExporting(null);
@@ -1060,37 +1056,37 @@ export function MindmapEditor(props: MindmapEditorProps) {
   );
 
   const dragHint = useMemo(() => {
-    if (persistedMindmapId) return "Drag: move node (position saved)";
-    if (props.mode === "try") return "Drag: move node (saved locally)";
-    return "Drag: move node (demo; not persisted)";
+    if (persistedMindmapId) return "拖拽：移动节点（自动保存位置）";
+    if (props.mode === "try") return "拖拽：移动节点（本地保存）";
+    return "拖拽：移动节点（演示，不会保存）";
   }, [persistedMindmapId, props.mode]);
 
   const statusLabel = useMemo(() => {
-    if (props.mode === "demo") return "Demo";
+    if (props.mode === "demo") return "演示";
     if (props.mode === "try") {
       switch (saveStatus) {
         case "saving":
-          return "Saving…";
+          return "保存中…";
         case "error":
-          return "Error";
+          return "出错";
         case "saved":
         case "idle":
         default:
-          return "Local";
+          return "本地";
       }
     }
     switch (saveStatus) {
       case "loading":
-        return "Loading…";
+        return "加载中…";
       case "saving":
-        return "Saving…";
+        return "保存中…";
       case "saved":
-        return "Saved";
+        return "已保存";
       case "error":
-        return "Error";
+        return "出错";
       case "idle":
       default:
-        return "Idle";
+        return "就绪";
     }
   }, [props.mode, saveStatus]);
 
@@ -1101,7 +1097,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     <main className="flex min-h-screen flex-col">
       {props.mode === "try" ? (
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-300">
-          <div>试玩模式：本地草稿（刷新不丢）。登录后可使用 AI 与云端保存。</div>
+          <div>你正在试玩本地草稿。登录后可使用 AI 与云端保存。</div>
           <div className="flex items-center gap-2">
             <Link
               className="rounded-md bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
@@ -1123,7 +1119,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
           <div className="text-sm font-medium">MindMaps AI</div>
           <div className="text-xs text-zinc-500">
             <span className="mr-2">{statusLabel}</span>
-            Selected: {selectedLabel}
+            选中：{selectedLabel}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -1131,19 +1127,19 @@ export function MindmapEditor(props: MindmapEditorProps) {
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
             disabled={!state || !canUndo}
             onClick={onUndo}
-            title="Undo (⌘Z / Ctrl+Z)"
+            title="撤销 (⌘Z / Ctrl+Z)"
             type="button"
           >
-            Undo
+            撤销
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
             disabled={!state || !canRedo}
             onClick={onRedo}
-            title="Redo (⌘⇧Z / Ctrl+Y)"
+            title="重做 (⌘⇧Z / Ctrl+Y)"
             type="button"
           >
-            Redo
+            重做
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -1151,7 +1147,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={onAddChild}
             type="button"
           >
-            Add child
+            新增子节点
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -1159,7 +1155,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={onAddSibling}
             type="button"
           >
-            Add sibling
+            新增同级
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -1167,7 +1163,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={onIndent}
             type="button"
           >
-            Indent
+            缩进
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -1175,7 +1171,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={onOutdent}
             type="button"
           >
-            Outdent
+            取消缩进
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -1183,7 +1179,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={() => onMoveSibling("up")}
             type="button"
           >
-            Move up
+            上移
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -1191,7 +1187,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={() => onMoveSibling("down")}
             type="button"
           >
-            Move down
+            下移
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -1199,7 +1195,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={onToggleCollapse}
             type="button"
           >
-            {selectedIsCollapsed ? "Expand" : "Collapse"}
+            {selectedIsCollapsed ? "展开" : "折叠"}
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -1207,7 +1203,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={onOpenInspector}
             type="button"
           >
-            Details
+            详情
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -1215,7 +1211,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={onDelete}
             type="button"
           >
-            Delete
+            删除
           </button>
           {persistedMindmapId ? (
             <button
@@ -1224,7 +1220,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
               onClick={onDeleteMindmap}
               type="button"
             >
-              {deletingMindmap ? "Deleting…" : "Delete mindmap"}
+              {deletingMindmap ? "删除中…" : "删除导图"}
             </button>
           ) : null}
           <button
@@ -1233,7 +1229,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={() => onExport("png")}
             type="button"
           >
-            {exporting === "png" ? "Exporting…" : "Export PNG"}
+            {exporting === "png" ? "导出中…" : "导出 PNG"}
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -1241,7 +1237,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             onClick={() => onExport("svg")}
             type="button"
           >
-            {exporting === "svg" ? "Exporting…" : "Export SVG"}
+            {exporting === "svg" ? "导出中…" : "导出 SVG"}
           </button>
         </div>
       </header>
@@ -1249,22 +1245,22 @@ export function MindmapEditor(props: MindmapEditorProps) {
       {loadError ? (
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 px-6 py-10">
           <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200">
-            Failed to load mindmap: {loadError}
+            加载失败：{loadError}
           </div>
           <Link className="text-sm underline" href="/mindmaps">
-            Back to mindmaps
+            回到我的导图
           </Link>
         </div>
       ) : !state ? (
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 px-6 py-10">
-          <div className="text-sm text-zinc-600 dark:text-zinc-300">Loading…</div>
+          <div className="text-sm text-zinc-600 dark:text-zinc-300">加载中…</div>
         </div>
       ) : (
         <div className="flex flex-1">
           <div className="flex min-h-0 flex-1 flex-col">
             {deleteMindmapError ? (
               <div className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200">
-                Delete failed: {deleteMindmapError}
+                删除失败：{deleteMindmapError}
               </div>
             ) : null}
             {shareError ? (
@@ -1340,17 +1336,17 @@ export function MindmapEditor(props: MindmapEditorProps) {
             ) : null}
             {saveError ? (
               <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
-                Save failed: {saveError}
+                保存失败：{saveError}
               </div>
             ) : null}
             {positionSaveError ? (
               <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
-                Position save failed: {positionSaveError}
+                位置保存失败：{positionSaveError}
               </div>
             ) : null}
             {exportError ? (
               <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
-                Export failed: {exportError}
+                导出失败：{exportError}
               </div>
             ) : null}
             <div className="relative min-h-0 flex-1">

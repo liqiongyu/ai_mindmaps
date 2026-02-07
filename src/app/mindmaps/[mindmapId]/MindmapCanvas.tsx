@@ -240,23 +240,23 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
       const wrapper = wrapperRef.current;
       const instance = reactFlowInstanceRef.current;
       if (!wrapper || !instance || !instance.viewportInitialized) {
-        return { ok: false, message: "Canvas not ready yet" };
+        return { ok: false, message: "画布尚未就绪" };
       }
 
       const viewportEl = wrapper.querySelector(".react-flow__viewport") as HTMLElement | null;
       if (!viewportEl) {
-        return { ok: false, message: "Canvas viewport not found" };
+        return { ok: false, message: "未找到画布视口" };
       }
 
       const width = wrapper.clientWidth;
       const height = wrapper.clientHeight;
       if (!width || !height) {
-        return { ok: false, message: "Canvas has zero size" };
+        return { ok: false, message: "画布尺寸为 0" };
       }
 
       const nodeList = instance.getNodes();
       if (nodeList.length === 0) {
-        return { ok: false, message: "No nodes to export" };
+        return { ok: false, message: "没有可导出的节点" };
       }
 
       const bounds = getNodesBounds(nodeList);
@@ -286,7 +286,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
           });
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Export failed";
+        const message = err instanceof Error ? err.message : "导出失败";
         return { ok: false, message };
       }
 
