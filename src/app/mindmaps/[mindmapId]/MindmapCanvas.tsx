@@ -26,6 +26,7 @@ import {
 } from "react";
 
 import type { MindmapState } from "@/lib/mindmap/ops";
+import type { OperationHighlightKind } from "@/lib/mindmap/operationSummary";
 import { mindmapStateToFlow } from "@/lib/mindmap/flow";
 
 type ExportResult = { ok: true } | { ok: false; message: string };
@@ -38,6 +39,7 @@ export type MindmapCanvasHandle = {
 type MindmapCanvasNodeData = {
   label: string;
   isEditing: boolean;
+  highlight?: OperationHighlightKind | null;
   onRequestEditNodeId?: (nodeId: string) => void;
   onCommitNodeTitle?: (args: { nodeId: string; title: string }) => { ok: true } | { ok: false };
   onCancelEditNodeId?: (nodeId: string) => void;
@@ -52,6 +54,19 @@ const MindmapNode = memo(function MindmapNode({
 }: NodeProps<MindmapCanvasNode>) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const skipNextBlurRef = useRef(false);
+
+  const highlightClass = useMemo(() => {
+    switch (data.highlight) {
+      case "add":
+        return "ring-2 ring-emerald-500/70 dark:ring-emerald-400/70 !bg-emerald-50 dark:!bg-emerald-950/30";
+      case "rename":
+        return "ring-2 ring-blue-500/70 dark:ring-blue-400/70 !bg-blue-50 dark:!bg-blue-950/30";
+      case "move":
+        return "ring-2 ring-purple-500/70 dark:ring-purple-400/70 !bg-purple-50 dark:!bg-purple-950/30";
+      default:
+        return "";
+    }
+  }, [data.highlight]);
 
   useEffect(() => {
     if (!data.isEditing) return;
@@ -74,7 +89,7 @@ const MindmapNode = memo(function MindmapNode({
   if (data.isEditing) {
     return (
       <div
-        className={`rounded-md border bg-white px-3 py-2 shadow-sm dark:bg-zinc-950 ${
+        className={`rounded-md border bg-white px-3 py-2 shadow-sm transition-all duration-300 dark:bg-zinc-950 ${highlightClass} ${
           selected ? "border-zinc-900 dark:border-zinc-100" : "border-zinc-200 dark:border-zinc-800"
         }`}
       >
@@ -128,7 +143,7 @@ const MindmapNode = memo(function MindmapNode({
 
   return (
     <div
-      className={`rounded-md border bg-white px-3 py-2 text-sm shadow-sm dark:bg-zinc-950 ${
+      className={`rounded-md border bg-white px-3 py-2 text-sm shadow-sm transition-all duration-300 dark:bg-zinc-950 ${highlightClass} ${
         selected ? "border-zinc-900 dark:border-zinc-100" : "border-zinc-200 dark:border-zinc-800"
       }`}
       onDoubleClick={(event) => {
@@ -149,6 +164,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     selectedNodeId,
     onSelectNodeId,
     collapsedNodeIds,
+    highlightByNodeId,
     editable = false,
     onPersistNodePosition,
     editingNodeId,
@@ -160,6 +176,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     selectedNodeId: string | null;
     onSelectNodeId: (nodeId: string | null) => void;
     collapsedNodeIds?: ReadonlySet<string>;
+    highlightByNodeId?: Readonly<Record<string, OperationHighlightKind>>;
     editable?: boolean;
     onPersistNodePosition?: (args: { nodeId: string; x: number; y: number }) => void;
     editingNodeId?: string | null;
@@ -183,6 +200,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
         data: {
           label: node.data.label,
           isEditing: node.id === editingNodeId,
+          highlight: highlightByNodeId?.[node.id] ?? null,
           onRequestEditNodeId,
           onCommitNodeTitle,
           onCancelEditNodeId,
@@ -195,6 +213,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     collapsedNodeIds,
     editable,
     editingNodeId,
+    highlightByNodeId,
     onCancelEditNodeId,
     onCommitNodeTitle,
     onRequestEditNodeId,
