@@ -9,6 +9,8 @@ import { MindmapCanvas } from "./MindmapCanvas";
 import type { MindmapState, Operation } from "@/lib/mindmap/ops";
 import { applyOperations } from "@/lib/mindmap/ops";
 import { sampleMindmapState } from "@/lib/mindmap/sample";
+import type { History } from "@/lib/mindmap/history";
+import { commitHistory, createHistory, redoHistory, undoHistory } from "@/lib/mindmap/history";
 import { MindmapStateSchema } from "@/lib/mindmap/storage";
 
 type EditorActionResult =
@@ -17,11 +19,15 @@ type EditorActionResult =
 
 type SaveStatus = "idle" | "loading" | "saving" | "saved" | "error";
 
+const MAX_HISTORY_PAST = 50;
+
 export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; mindmapId: string }) {
   const persistedMindmapId = props.mode === "persisted" ? props.mindmapId : null;
-  const [state, setState] = useState<MindmapState | null>(
-    props.mode === "demo" ? sampleMindmapState : null,
-  );
+  const [history, setHistory] = useState<History<MindmapState> | null>(() => {
+    if (props.mode !== "demo") return null;
+    return createHistory(sampleMindmapState);
+  });
+  const state = history?.present ?? null;
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
     props.mode === "demo" ? sampleMindmapState.rootNodeId : null,
   );
@@ -52,6 +58,14 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   }, [state]);
 
   useEffect(() => {
+    if (!state) return;
+    setSelectedNodeId((currentSelected) => {
+      if (!currentSelected) return state.rootNodeId;
+      return state.nodesById[currentSelected] ? currentSelected : state.rootNodeId;
+    });
+  }, [state]);
+
+  useEffect(() => {
     if (!persistedMindmapId) return;
 
     let cancelled = false;
@@ -62,7 +76,8 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setCopied(false);
     setSharing(false);
     setSaveStatus("loading");
-    setState(null);
+    setHistory(null);
+    stateRef.current = null;
     setSelectedNodeId(null);
 
     (async () => {
@@ -86,7 +101,8 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
 
         if (cancelled) return;
         skipNextSaveRef.current = true;
-        setState(parsed.data);
+        stateRef.current = parsed.data;
+        setHistory(createHistory(parsed.data));
         setSelectedNodeId(parsed.data.rootNodeId);
         setSaveStatus("saved");
       } catch (err) {
@@ -154,6 +170,64 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     };
   }, [loadError, persistedMindmapId, state]);
 
+  const commit = useCallback((nextState: MindmapState) => {
+    stateRef.current = nextState;
+    setHistory((current) => {
+      if (!current) return createHistory(nextState);
+      return commitHistory(current, nextState, MAX_HISTORY_PAST);
+    });
+  }, []);
+
+  const onUndo = useCallback(() => {
+    setHistory((current) => {
+      if (!current) return current;
+      const next = undoHistory(current);
+      if (!next) return current;
+      stateRef.current = next.present;
+      return next;
+    });
+  }, []);
+
+  const onRedo = useCallback(() => {
+    setHistory((current) => {
+      if (!current) return current;
+      const next = redoHistory(current);
+      if (!next) return current;
+      stateRef.current = next.present;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const { target } = event;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+      }
+
+      const key = event.key.toLowerCase();
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod) return;
+
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        onUndo();
+        return;
+      }
+
+      if (key === "y" || (key === "z" && event.shiftKey)) {
+        event.preventDefault();
+        onRedo();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onRedo, onUndo]);
+
   const apply = useCallback(
     (ops: Operation[], nextSelectedNodeId: string | null): EditorActionResult => {
       try {
@@ -181,9 +255,9 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     const result = apply([{ type: "add_node", nodeId, parentId, text: title }], nodeId);
     if (!result.ok) return globalThis.alert(result.message);
 
-    setState(result.nextState);
+    commit(result.nextState);
     setSelectedNodeId(result.nextSelectedNodeId);
-  }, [apply, selectedNodeId, state]);
+  }, [apply, commit, selectedNodeId, state]);
 
   const onRename = useCallback(() => {
     if (!state) return;
@@ -201,9 +275,9 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     );
     if (!result.ok) return globalThis.alert(result.message);
 
-    setState(result.nextState);
+    commit(result.nextState);
     setSelectedNodeId(result.nextSelectedNodeId);
-  }, [apply, selectedNodeId, state]);
+  }, [apply, commit, selectedNodeId, state]);
 
   const onDelete = useCallback(() => {
     if (!state) return;
@@ -218,29 +292,32 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     const result = apply([{ type: "delete_node", nodeId: selectedNodeId }], state.rootNodeId);
     if (!result.ok) return globalThis.alert(result.message);
 
-    setState(result.nextState);
+    commit(result.nextState);
     setSelectedNodeId(result.nextSelectedNodeId);
-  }, [apply, selectedNodeId, state]);
+  }, [apply, commit, selectedNodeId, state]);
 
-  const applyAIOperations = useCallback((operations: Operation[]) => {
-    const current = stateRef.current;
-    if (!current) {
-      return { ok: false as const, message: "Mindmap not loaded yet" };
-    }
+  const applyAIOperations = useCallback(
+    (operations: Operation[]) => {
+      const current = stateRef.current;
+      if (!current) {
+        return { ok: false as const, message: "Mindmap not loaded yet" };
+      }
 
-    try {
-      const next = applyOperations(current, operations);
-      setState(next);
-      setSelectedNodeId((currentSelected) => {
-        if (!currentSelected) return next.rootNodeId;
-        return next.nodesById[currentSelected] ? currentSelected : next.rootNodeId;
-      });
-      return { ok: true as const };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to apply operations";
-      return { ok: false as const, message };
-    }
-  }, []);
+      try {
+        const next = applyOperations(current, operations);
+        commit(next);
+        setSelectedNodeId((currentSelected) => {
+          if (!currentSelected) return next.rootNodeId;
+          return next.nodesById[currentSelected] ? currentSelected : next.rootNodeId;
+        });
+        return { ok: true as const };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to apply operations";
+        return { ok: false as const, message };
+      }
+    },
+    [commit],
+  );
 
   const onShare = useCallback(async () => {
     if (!persistedMindmapId) return;
@@ -294,6 +371,9 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     }
   }, [props.mode, saveStatus]);
 
+  const canUndo = history ? history.past.length > 0 : false;
+  const canRedo = history ? history.future.length > 0 : false;
+
   return (
     <main className="flex min-h-screen flex-col">
       <header className="flex h-14 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800">
@@ -305,6 +385,24 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            disabled={!state || !canUndo}
+            onClick={onUndo}
+            title="Undo (⌘Z / Ctrl+Z)"
+            type="button"
+          >
+            Undo
+          </button>
+          <button
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            disabled={!state || !canRedo}
+            onClick={onRedo}
+            title="Redo (⌘⇧Z / Ctrl+Y)"
+            type="button"
+          >
+            Redo
+          </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
             disabled={!state}
