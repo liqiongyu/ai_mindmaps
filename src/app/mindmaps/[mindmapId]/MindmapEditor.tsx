@@ -85,6 +85,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [stoppingShare, setStoppingShare] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [deletingMindmap, setDeletingMindmap] = useState(false);
   const [deleteMindmapError, setDeleteMindmapError] = useState<string | null>(null);
@@ -221,6 +222,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     setDeleteMindmapError(null);
     setCopied(false);
     setSharing(false);
+    setStoppingShare(false);
     setExportError(null);
     setExporting(null);
     setPositionSaveError(null);
@@ -236,7 +238,11 @@ export function MindmapEditor(props: MindmapEditorProps) {
       try {
         const res = await fetch(`/api/mindmaps/${persistedMindmapId}`);
         const json = (await res.json().catch(() => null)) as
-          | { ok: true; state: unknown }
+          | {
+              ok: true;
+              state: unknown;
+              mindmap?: { isPublic?: boolean; publicSlug?: string | null };
+            }
           | { ok: false; message?: string }
           | null;
 
@@ -252,6 +258,15 @@ export function MindmapEditor(props: MindmapEditorProps) {
         }
 
         if (cancelled) return;
+        const isPublic = Boolean(json.mindmap?.isPublic);
+        const publicSlug =
+          typeof json.mindmap?.publicSlug === "string" ? json.mindmap.publicSlug : null;
+        if (isPublic && publicSlug) {
+          setShareUrl(new URL(`/public/${publicSlug}`, window.location.origin).toString());
+        } else {
+          setShareUrl(null);
+        }
+        setCopied(false);
         skipNextSaveRef.current = true;
         stateRef.current = parsed.data;
         setHistory(createHistory(parsed.data));
@@ -927,6 +942,38 @@ export function MindmapEditor(props: MindmapEditorProps) {
     }
   }, [persistedMindmapId]);
 
+  const onStopSharing = useCallback(async () => {
+    if (!persistedMindmapId) return;
+    if (!shareUrl) return;
+
+    const confirmed = window.confirm("停止分享后，旧链接将无法访问。继续？");
+    if (!confirmed) return;
+
+    setStoppingShare(true);
+    setShareError(null);
+    setCopied(false);
+    try {
+      const res = await fetch(`/api/mindmaps/${persistedMindmapId}/share`, { method: "DELETE" });
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || json.ok !== true) {
+        throw new Error(
+          (json && "message" in json && json.message) || `Stop sharing failed (${res.status})`,
+        );
+      }
+
+      setShareUrl(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Stop sharing failed";
+      setShareError(message);
+    } finally {
+      setStoppingShare(false);
+    }
+  }, [persistedMindmapId, shareUrl]);
+
   const onDeleteMindmap = useCallback(async () => {
     if (!persistedMindmapId) return;
     const confirmed = window.confirm("Delete this mindmap? This cannot be undone.");
@@ -1172,16 +1219,6 @@ export function MindmapEditor(props: MindmapEditorProps) {
           </button>
           {persistedMindmapId ? (
             <button
-              className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-              disabled={!state || sharing || deletingMindmap}
-              onClick={onShare}
-              type="button"
-            >
-              {sharing ? "Sharing…" : shareUrl ? "Refresh link" : "Share"}
-            </button>
-          ) : null}
-          {persistedMindmapId ? (
-            <button
               className="rounded-md border border-red-200 px-3 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:text-red-200 dark:hover:bg-red-950/30"
               disabled={!state || deletingMindmap}
               onClick={onDeleteMindmap}
@@ -1235,26 +1272,66 @@ export function MindmapEditor(props: MindmapEditorProps) {
                 Share failed: {shareError}
               </div>
             ) : null}
-            {shareUrl ? (
+            {persistedMindmapId ? (
               <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <a className="underline" href={shareUrl} rel="noreferrer" target="_blank">
-                    {shareUrl}
-                  </a>
-                  <button
-                    className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] hover:bg-white dark:border-zinc-800 dark:hover:bg-zinc-900"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(shareUrl);
-                        setCopied(true);
-                      } catch {
-                        setCopied(false);
-                      }
-                    }}
-                    type="button"
-                  >
-                    {copied ? "Copied" : "Copy link"}
-                  </button>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-medium text-zinc-500">分享状态</div>
+                    <div className="mt-0.5">
+                      {shareUrl ? "公开（持链接可见，只读）" : "私有（仅我可见）"}
+                    </div>
+                    {shareUrl ? (
+                      <a
+                        className="mt-1 block break-all underline"
+                        href={shareUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {shareUrl}
+                      </a>
+                    ) : (
+                      <div className="mt-1 text-[11px] text-zinc-500">
+                        生成链接后可分享只读页面。
+                      </div>
+                    )}
+                    <div className="mt-1 text-[11px] text-zinc-500">
+                      公开页不会展示聊天记录与 AI ops。
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <button
+                      className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+                      disabled={!state || sharing || stoppingShare || deletingMindmap}
+                      onClick={onShare}
+                      type="button"
+                    >
+                      {sharing ? "处理中…" : shareUrl ? "刷新链接" : "生成链接"}
+                    </button>
+                    <button
+                      className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+                      disabled={!shareUrl || sharing || stoppingShare}
+                      onClick={async () => {
+                        if (!shareUrl) return;
+                        try {
+                          await navigator.clipboard.writeText(shareUrl);
+                          setCopied(true);
+                        } catch {
+                          setCopied(false);
+                        }
+                      }}
+                      type="button"
+                    >
+                      {copied ? "已复制" : "复制链接"}
+                    </button>
+                    <button
+                      className="rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:bg-zinc-950 dark:text-red-200 dark:hover:bg-red-950/30"
+                      disabled={!shareUrl || sharing || stoppingShare}
+                      onClick={onStopSharing}
+                      type="button"
+                    >
+                      {stoppingShare ? "停止中…" : "停止分享"}
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : null}

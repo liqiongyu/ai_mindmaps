@@ -21,7 +21,7 @@ export async function GET(
 
   const { data: mindmap, error: mindmapError } = await supabase
     .from("mindmaps")
-    .select("id,title,root_node_id,updated_at")
+    .select("id,title,root_node_id,updated_at,is_public,public_slug")
     .eq("id", mindmapId)
     .eq("owner_id", data.user.id)
     .maybeSingle();
@@ -51,6 +51,8 @@ export async function GET(
       title: mindmap.title,
       rootNodeId: mindmap.root_node_id,
       updatedAt: mindmap.updated_at,
+      isPublic: mindmap.is_public,
+      publicSlug: mindmap.public_slug,
     },
     state,
   });
