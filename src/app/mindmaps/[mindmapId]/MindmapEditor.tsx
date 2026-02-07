@@ -15,6 +15,11 @@ import { sampleMindmapState } from "@/lib/mindmap/sample";
 import type { History } from "@/lib/mindmap/history";
 import { commitHistory, createHistory, redoHistory, undoHistory } from "@/lib/mindmap/history";
 import { MindmapStateSchema } from "@/lib/mindmap/storage";
+import {
+  parseTryDraftJson,
+  stringifyTryDraft,
+  TRY_DRAFT_STORAGE_KEY,
+} from "@/lib/mindmap/tryDraft";
 
 type EditorActionResult =
   | { ok: true; nextState: MindmapState; nextSelectedNodeId: string | null }
@@ -25,21 +30,49 @@ type SaveStatus = "idle" | "loading" | "saving" | "saved" | "error";
 const MAX_HISTORY_PAST = 50;
 const NEW_NODE_DEFAULT_TITLE = "New node";
 
-export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; mindmapId: string }) {
+type MindmapEditorProps =
+  | { mode: "demo" }
+  | { mode: "try" }
+  | { mode: "persisted"; mindmapId: string };
+
+export function MindmapEditor(props: MindmapEditorProps) {
   const persistedMindmapId = props.mode === "persisted" ? props.mindmapId : null;
   const router = useRouter();
+
+  const initialTryDraft = useMemo(() => {
+    if (props.mode !== "try") return null;
+    try {
+      const raw = localStorage.getItem(TRY_DRAFT_STORAGE_KEY);
+      if (!raw) return null;
+      return parseTryDraftJson(raw);
+    } catch {
+      return null;
+    }
+  }, [props.mode]);
+
   const [history, setHistory] = useState<History<MindmapState> | null>(() => {
-    if (props.mode !== "demo") return null;
+    if (props.mode === "persisted") return null;
+    if (props.mode === "try") {
+      return createHistory(initialTryDraft?.state ?? sampleMindmapState);
+    }
     return createHistory(sampleMindmapState);
   });
   const state = history?.present ?? null;
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
-    props.mode === "demo" ? sampleMindmapState.rootNodeId : null,
-  );
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(() => {
+    if (props.mode === "persisted") return null;
+    if (props.mode === "demo") return sampleMindmapState.rootNodeId;
+
+    const initialState = initialTryDraft?.state ?? sampleMindmapState;
+    const desired = initialTryDraft?.ui.selectedNodeId;
+    if (desired && initialState.nodesById[desired]) return desired;
+    return initialState.rootNodeId;
+  });
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>(
-    props.mode === "demo" ? "idle" : "loading",
-  );
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => {
+    if (props.mode === "demo") return "idle";
+    if (props.mode === "try") return initialTryDraft ? "saved" : "idle";
+    return "loading";
+  });
   const [saveError, setSaveError] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -51,7 +84,14 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const [exportError, setExportError] = useState<string | null>(null);
   const [positionSaveError, setPositionSaveError] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(() => new Set());
+  const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(() => {
+    if (props.mode !== "try") return new Set();
+    if (!initialTryDraft) return new Set();
+    const validIds = initialTryDraft.ui.collapsedNodeIds.filter((id) =>
+      Boolean(initialTryDraft.state.nodesById[id]),
+    );
+    return new Set(validIds);
+  });
 
   const inspectorOpenRef = useRef(inspectorOpen);
   const stateRef = useRef<MindmapState | null>(state);
@@ -264,6 +304,45 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, [loadError, persistedMindmapId, state]);
+
+  useEffect(() => {
+    if (props.mode !== "try") return;
+    if (!state) return;
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+
+    setSaveStatus("saving");
+    setSaveError(null);
+    const seq = (saveSeqRef.current += 1);
+
+    saveTimerRef.current = setTimeout(() => {
+      if (saveSeqRef.current !== seq) return;
+
+      try {
+        const draft = {
+          state,
+          updatedAt: new Date().toISOString(),
+          ui: {
+            collapsedNodeIds: Array.from(collapsedNodeIds),
+            selectedNodeId,
+          },
+        };
+        localStorage.setItem(TRY_DRAFT_STORAGE_KEY, stringifyTryDraft(draft));
+        setSaveStatus("saved");
+        setSaveError(null);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Local save failed";
+        setSaveStatus("error");
+        setSaveError(message);
+      }
+    }, 250);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [collapsedNodeIds, props.mode, selectedNodeId, state]);
 
   useEffect(() => {
     if (!persistedMindmapId) return;
@@ -757,11 +836,24 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
 
   const dragHint = useMemo(() => {
     if (persistedMindmapId) return "Drag: move node (position saved)";
+    if (props.mode === "try") return "Drag: move node (saved locally)";
     return "Drag: move node (demo; not persisted)";
-  }, [persistedMindmapId]);
+  }, [persistedMindmapId, props.mode]);
 
   const statusLabel = useMemo(() => {
     if (props.mode === "demo") return "Demo";
+    if (props.mode === "try") {
+      switch (saveStatus) {
+        case "saving":
+          return "Saving…";
+        case "error":
+          return "Error";
+        case "saved":
+        case "idle":
+        default:
+          return "Local";
+      }
+    }
     switch (saveStatus) {
       case "loading":
         return "Loading…";
@@ -782,6 +874,25 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
 
   return (
     <main className="flex min-h-screen flex-col">
+      {props.mode === "try" ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-300">
+          <div>试玩模式：本地草稿（刷新不丢）。登录后可使用 AI 与云端保存。</div>
+          <div className="flex items-center gap-2">
+            <Link
+              className="rounded-md bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              href="/login"
+            >
+              登录
+            </Link>
+            <Link
+              className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] font-medium hover:bg-white dark:border-zinc-800 dark:hover:bg-zinc-900"
+              href="/signup"
+            >
+              注册
+            </Link>
+          </div>
+        </div>
+      ) : null}
       <header className="flex h-14 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800">
         <div className="flex flex-col gap-0.5">
           <div className="text-sm font-medium">MindMaps AI</div>
@@ -1006,6 +1117,42 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
               selectedNodeId={selectedNodeId}
               selectedNodeLabel={selectedLabel}
             />
+          ) : props.mode === "try" ? (
+            <aside className="hidden w-80 shrink-0 flex-col border-l border-zinc-200 bg-white lg:flex dark:border-zinc-800 dark:bg-zinc-950">
+              <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+                <div className="text-sm font-medium">提示词示例（登录后可用）</div>
+                <div className="mt-1 text-xs text-zinc-500">
+                  试玩用于体验编辑器手感；登录后可用 AI 一句话扩展结构。
+                </div>
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4 text-sm text-zinc-700 dark:text-zinc-200">
+                <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+                  为“产品发布计划”生成导图骨架。
+                </div>
+                <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+                  把“风险”节点展开 5 个分支，并补充应对措施。
+                </div>
+                <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+                  重新组织结构：把“执行”拆成“准备/进行中/复盘”三个阶段。
+                </div>
+              </div>
+              <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+                <div className="flex gap-2">
+                  <Link
+                    className="flex-1 rounded-md bg-zinc-900 px-3 py-2 text-center text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                    href="/login"
+                  >
+                    登录
+                  </Link>
+                  <Link
+                    className="flex-1 rounded-md border border-zinc-200 px-3 py-2 text-center text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+                    href="/signup"
+                  >
+                    注册
+                  </Link>
+                </div>
+              </div>
+            </aside>
           ) : null}
         </div>
       )}
