@@ -19,7 +19,13 @@ export function validateOperationsScope(args: {
     return { ok: false, message: "selectedNodeId is required for node scope" };
   }
 
-  const allowed = getSubtreeNodeIds(state, selectedNodeId);
+  let allowed: Set<string>;
+  try {
+    allowed = getSubtreeNodeIds(state, selectedNodeId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Invalid selectedNodeId";
+    return { ok: false, message };
+  }
 
   const isAllowed = (id: string) => allowed.has(id);
   const requireAllowed = (id: string, reason: string) => {
