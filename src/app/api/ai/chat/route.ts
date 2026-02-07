@@ -10,6 +10,7 @@ import {
 import { normalizeAiMindmapOperationIds } from "@/lib/ai/mindmapOps";
 import { parseFirstJsonObject } from "@/lib/ai/json";
 import { OperationSchema, applyOperations } from "@/lib/mindmap/ops";
+import { hasDeleteNodeOperation } from "@/lib/mindmap/operationSummary";
 import { nodeRowsToMindmapState } from "@/lib/mindmap/storage";
 import { validateOperationsScope } from "@/lib/mindmap/scope";
 import { createAzureOpenAIClient, getAzureOpenAIConfigFromEnv } from "@/lib/llm/azureOpenAI";
@@ -316,6 +317,7 @@ export async function POST(request: Request) {
     "",
     "Rules:",
     "- Do not delete or move the root node.",
+    "- Do not delete nodes (do not output delete_node).",
     "- Reference existing nodes by their id.",
     '- For add_node, set nodeId to a UNIQUE temporary id (e.g. "n1", "n2"). The system will replace it with a UUID.',
     "- If uncertain, set operations to [] and ask a clarifying question in assistant_message.",
@@ -434,6 +436,10 @@ export async function POST(request: Request) {
 
   if (!modelOutput) {
     return jsonError(500, "AI provider error", { detail: "Model output unavailable" });
+  }
+
+  if (hasDeleteNodeOperation(modelOutput.operations)) {
+    return jsonError(400, "为安全起见，AI 默认不会删除节点。如需删除，请明确说明要删除哪些节点。");
   }
 
   const scopeCheck = validateOperationsScope({

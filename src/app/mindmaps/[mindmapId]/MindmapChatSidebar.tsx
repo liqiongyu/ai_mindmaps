@@ -3,9 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Operation } from "@/lib/mindmap/ops";
+import { summarizeOperations } from "@/lib/mindmap/operationSummary";
 
 type ChatScope = "global" | "node";
-type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
+type ChatMessage = {
+  role: "user" | "assistant" | "system";
+  content: string;
+  operations?: Operation[] | null;
+};
 
 function getThreadKey(scope: ChatScope, selectedNodeId: string | null): string | null {
   if (scope === "global") return "global";
@@ -78,7 +83,11 @@ export function MindmapChatSidebar({
         const json = (await res.json().catch(() => null)) as
           | {
               ok: true;
-              messages: Array<{ role: ChatMessage["role"]; content: string }>;
+              messages: Array<{
+                role: ChatMessage["role"];
+                content: string;
+                operations?: Operation[] | null;
+              }>;
             }
           | { ok: false; message?: string }
           | null;
@@ -91,12 +100,19 @@ export function MindmapChatSidebar({
         }
 
         const nextMessages = Array.isArray(json.messages)
-          ? json.messages.filter(
-              (m) =>
-                m &&
-                (m.role === "user" || m.role === "assistant" || m.role === "system") &&
-                typeof m.content === "string",
-            )
+          ? json.messages
+              .filter(
+                (m) =>
+                  m &&
+                  (m.role === "user" || m.role === "assistant" || m.role === "system") &&
+                  typeof m.content === "string",
+              )
+              .map((m) => ({
+                role: m.role,
+                content: m.content,
+                operations:
+                  m.role === "assistant" && Array.isArray(m.operations) ? m.operations : null,
+              }))
           : [];
 
         setMessagesByThreadKey((prev) => ({ ...prev, [threadKey]: nextMessages }));
@@ -163,7 +179,7 @@ export function MindmapChatSidebar({
         ...prev,
         [activeThreadKey]: [
           ...(prev[activeThreadKey] ?? []),
-          { role: "assistant", content: json.assistant_message },
+          { role: "assistant", content: json.assistant_message, operations: json.operations },
         ],
       }));
 
@@ -244,6 +260,21 @@ export function MindmapChatSidebar({
                 <div className="text-sm whitespace-pre-wrap text-zinc-900 dark:text-zinc-100">
                   {m.content}
                 </div>
+                {m.role === "assistant" && m.operations && m.operations.length > 0
+                  ? (() => {
+                      const summary = summarizeOperations(m.operations);
+                      const move = summary.move + summary.reorder;
+                      const shouldShow =
+                        summary.add > 0 || summary.rename > 0 || move > 0 || summary.delete > 0;
+                      if (!shouldShow) return null;
+                      return (
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                          变更摘要：新增 {summary.add} · 改名 {summary.rename} · 移动 {move} · 删除{" "}
+                          {summary.delete}
+                        </div>
+                      );
+                    })()
+                  : null}
               </div>
             ))
           )}

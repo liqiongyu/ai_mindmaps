@@ -15,6 +15,10 @@ import { getMindmapEditorKeyAction } from "@/lib/mindmap/keybindings";
 import { sampleMindmapState } from "@/lib/mindmap/sample";
 import type { History } from "@/lib/mindmap/history";
 import { commitHistory, createHistory, redoHistory, undoHistory } from "@/lib/mindmap/history";
+import {
+  deriveOperationHighlights,
+  type OperationHighlightKind,
+} from "@/lib/mindmap/operationSummary";
 import { MindmapStateSchema } from "@/lib/mindmap/storage";
 import {
   parseTryDraftJson,
@@ -69,6 +73,9 @@ export function MindmapEditor(props: MindmapEditorProps) {
     return initialState.rootNodeId;
   });
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [highlightByNodeId, setHighlightByNodeId] = useState<
+    Record<string, OperationHighlightKind>
+  >({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => {
     if (props.mode === "demo") return "idle";
@@ -103,6 +110,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const skipNextSaveRef = useRef(false);
   const pendingSaveRef = useRef(false);
   const tryDraftJsonRef = useRef<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedNode = state && selectedNodeId ? state.nodesById[selectedNodeId] : null;
 
@@ -435,6 +443,13 @@ export function MindmapEditor(props: MindmapEditorProps) {
     if (!inspectorOpenRef.current) return;
     setInspectorOpen(false);
   }, [selectedNodeId]);
+
+  useEffect(() => {
+    return () => {
+      if (!highlightTimerRef.current) return;
+      clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
 
   const commit = useCallback((nextState: MindmapState) => {
     stateRef.current = nextState;
@@ -803,6 +818,23 @@ export function MindmapEditor(props: MindmapEditorProps) {
       try {
         const next = applyOperations(current, operations);
         commit(next);
+        const derived = deriveOperationHighlights(operations);
+        const filtered: Record<string, OperationHighlightKind> = {};
+        for (const [nodeId, kind] of Object.entries(derived)) {
+          if (next.nodesById[nodeId]) {
+            filtered[nodeId] = kind;
+          }
+        }
+        if (highlightTimerRef.current) {
+          clearTimeout(highlightTimerRef.current);
+          highlightTimerRef.current = null;
+        }
+        setHighlightByNodeId(filtered);
+        if (Object.keys(filtered).length > 0) {
+          highlightTimerRef.current = setTimeout(() => {
+            setHighlightByNodeId({});
+          }, 3500);
+        }
         setSelectedNodeId((currentSelected) => {
           if (!currentSelected) return next.rootNodeId;
           return next.nodesById[currentSelected] ? currentSelected : next.rootNodeId;
@@ -1250,6 +1282,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
                 collapsedNodeIds={collapsedNodeIds}
                 editable
                 editingNodeId={editingNodeId}
+                highlightByNodeId={highlightByNodeId}
                 onCancelEditNodeId={onCancelEditNodeId}
                 onCommitNodeTitle={onCommitNodeTitle}
                 onPersistNodePosition={onPersistNodePosition}
