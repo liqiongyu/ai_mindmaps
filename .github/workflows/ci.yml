@@ -15,6 +15,9 @@ permissions:
 env:
   NEXT_TELEMETRY_DISABLED: "1"
   TURBO_TELEMETRY_DISABLED: "1"
+  # CI build should not require real Supabase secrets.
+  NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: "dummy-anon-key"
 
 jobs:
   ci:
