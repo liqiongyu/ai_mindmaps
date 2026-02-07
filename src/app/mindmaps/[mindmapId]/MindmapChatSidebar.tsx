@@ -166,9 +166,9 @@ export function MindmapChatSidebar({
 
   const onApplyChip = useCallback((template: string) => {
     setInput((prev) => {
-      const trimmed = prev.trim();
-      if (!trimmed) return template;
-      return `${trimmed}\n${template}`;
+      const base = prev.trimEnd();
+      if (base.trim().length === 0) return template;
+      return `${base}\n${template}`;
     });
   }, []);
 
@@ -460,6 +460,11 @@ export function MindmapChatSidebar({
                   />
                   允许删除
                 </label>
+                {constraints.allowDelete ? (
+                  <div className="text-[11px] text-red-700 dark:text-red-200">
+                    注意：允许删除属于危险操作。
+                  </div>
+                ) : null}
               </div>
             </div>
           </details>
