@@ -4,6 +4,7 @@ AI 对话式思维导图工具：通过自然语言对话协作生成与完善�
 
 - PRD：`docs/prd.md`
 - GitHub/`gh` 操作：`docs/github-cli.md`
+- 发布流程：`docs/release.md`
 
 ## 本地开发（预期）
 
