@@ -26,6 +26,7 @@ import {
   type OperationHighlightKind,
 } from "@/lib/mindmap/operationSummary";
 import { MindmapStateSchema } from "@/lib/mindmap/storage";
+import { MindmapUiStateSchema, type MindmapViewport } from "@/lib/mindmap/uiState";
 import {
   parseTryDraftJson,
   stringifyTryDraft,
@@ -102,6 +103,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     return "loading";
   });
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [uiSaveError, setUiSaveError] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [stoppingShare, setStoppingShare] = useState(false);
@@ -121,6 +123,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
     );
     return new Set(validIds);
   });
+  const [viewport, setViewport] = useState<MindmapViewport | null>(() => {
+    if (props.mode !== "try") return null;
+    return initialTryDraft?.ui.viewport ?? null;
+  });
 
   const inspectorOpenRef = useRef(inspectorOpen);
   const historyRef = useRef<History<MindmapState> | null>(history);
@@ -129,7 +135,12 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSeqRef = useRef(0);
   const skipNextSaveRef = useRef(false);
+  const uiSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uiSaveSeqRef = useRef(0);
+  const skipNextUiSaveRef = useRef(false);
   const pendingSaveRef = useRef(false);
+  const pendingUiSaveRef = useRef(false);
+  const uiStateJsonRef = useRef<string | null>(null);
   const tryDraftJsonRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dangerMenuRef = useRef<HTMLDetailsElement | null>(null);
@@ -241,6 +252,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     let cancelled = false;
     setLoadError(null);
     setSaveError(null);
+    setUiSaveError(null);
     setShareUrl(null);
     setShareError(null);
     setDeletingMindmap(false);
@@ -253,11 +265,14 @@ export function MindmapEditor(props: MindmapEditorProps) {
     setPositionSaveError(null);
     setInspectorOpen(false);
     setCollapsedNodeIds(new Set());
+    setViewport(null);
     setSaveStatus("loading");
     setHistory(null);
     historyRef.current = null;
     stateRef.current = null;
     pendingSaveRef.current = false;
+    pendingUiSaveRef.current = false;
+    uiStateJsonRef.current = null;
     setSelectedNodeId(null);
 
     (async () => {
@@ -267,6 +282,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
           | {
               ok: true;
               state: unknown;
+              ui?: unknown;
               mindmap?: { isPublic?: boolean; publicSlug?: string | null };
             }
           | { ok: false; message?: string }
@@ -294,11 +310,22 @@ export function MindmapEditor(props: MindmapEditorProps) {
         }
         setCopied(false);
         skipNextSaveRef.current = true;
+        skipNextUiSaveRef.current = true;
         stateRef.current = parsed.data;
+        const uiParsed = MindmapUiStateSchema.safeParse(json.ui ?? {});
+        const ui = uiParsed.success ? uiParsed.data : null;
         const nextHistory = createHistory(parsed.data);
         historyRef.current = nextHistory;
         setHistory(nextHistory);
-        setSelectedNodeId(parsed.data.rootNodeId);
+        const nextCollapsedNodeIds =
+          ui?.collapsedNodeIds.filter((id) => Boolean(parsed.data.nodesById[id])) ?? [];
+        const nextSelectedNodeId =
+          ui?.selectedNodeId && parsed.data.nodesById[ui.selectedNodeId]
+            ? ui.selectedNodeId
+            : parsed.data.rootNodeId;
+        setCollapsedNodeIds(new Set(nextCollapsedNodeIds));
+        setViewport(ui?.viewport ?? null);
+        setSelectedNodeId(nextSelectedNodeId);
         setSaveStatus("saved");
       } catch (err) {
         if (cancelled) return;
@@ -312,6 +339,73 @@ export function MindmapEditor(props: MindmapEditorProps) {
       cancelled = true;
     };
   }, [persistedMindmapId]);
+
+  useEffect(() => {
+    if (!persistedMindmapId) return;
+    if (loadError) return;
+    if (!stateRef.current) return;
+
+    if (skipNextUiSaveRef.current) {
+      skipNextUiSaveRef.current = false;
+      return;
+    }
+
+    if (uiSaveTimerRef.current) {
+      clearTimeout(uiSaveTimerRef.current);
+    }
+
+    setUiSaveError(null);
+    pendingUiSaveRef.current = true;
+    const seq = (uiSaveSeqRef.current += 1);
+
+    const currentState = stateRef.current;
+    const collapsedNodeIdsToSave = Array.from(collapsedNodeIds)
+      .filter((id) => Boolean(currentState.nodesById[id]))
+      .sort();
+    const selectedNodeIdToSave =
+      selectedNodeId && currentState.nodesById[selectedNodeId]
+        ? selectedNodeId
+        : currentState.rootNodeId;
+    const uiPayload = {
+      collapsedNodeIds: collapsedNodeIdsToSave,
+      selectedNodeId: selectedNodeIdToSave,
+      viewport,
+    };
+
+    uiStateJsonRef.current = JSON.stringify(uiPayload);
+
+    uiSaveTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/mindmaps/${persistedMindmapId}/ui`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: uiStateJsonRef.current,
+        });
+        const json = (await res.json().catch(() => null)) as
+          | { ok: true }
+          | { ok: false; message?: string }
+          | null;
+
+        if (uiSaveSeqRef.current !== seq) return;
+        if (!res.ok || !json || json.ok !== true) {
+          throw new Error(
+            (json && "message" in json && json.message) || `视图状态保存失败（${res.status}）`,
+          );
+        }
+
+        pendingUiSaveRef.current = false;
+        setUiSaveError(null);
+      } catch (err) {
+        if (uiSaveSeqRef.current !== seq) return;
+        const message = err instanceof Error ? err.message : "视图状态保存失败";
+        setUiSaveError(message);
+      }
+    }, 500);
+
+    return () => {
+      if (uiSaveTimerRef.current) clearTimeout(uiSaveTimerRef.current);
+    };
+  }, [collapsedNodeIds, loadError, persistedMindmapId, selectedNodeId, viewport]);
 
   useEffect(() => {
     if (!persistedMindmapId) return;
@@ -368,6 +462,44 @@ export function MindmapEditor(props: MindmapEditorProps) {
   }, [loadError, persistedMindmapId, state]);
 
   useEffect(() => {
+    if (!persistedMindmapId) return;
+
+    const flush = () => {
+      if (!pendingUiSaveRef.current) return;
+      const json = uiStateJsonRef.current;
+      if (!json) return;
+
+      const url = `/api/mindmaps/${persistedMindmapId}/ui`;
+
+      try {
+        const blob = new Blob([json], { type: "application/json" });
+        if (navigator.sendBeacon?.(url, blob)) {
+          return;
+        }
+      } catch {
+        // Ignore and fallback to fetch keepalive.
+      }
+
+      try {
+        void fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: json,
+          keepalive: true,
+        });
+      } catch {
+        // Ignore best-effort flush errors.
+      }
+    };
+
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [persistedMindmapId]);
+
+  useEffect(() => {
     if (props.mode !== "try") return;
     if (!state) return;
 
@@ -387,6 +519,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         ui: {
           collapsedNodeIds: Array.from(collapsedNodeIds),
           selectedNodeId,
+          viewport,
         },
       };
       tryDraftJsonRef.current = stringifyTryDraft(draft);
@@ -419,7 +552,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [collapsedNodeIds, props.mode, selectedNodeId, state]);
+  }, [collapsedNodeIds, props.mode, selectedNodeId, state, viewport]);
 
   useEffect(() => {
     if (!persistedMindmapId) return;
@@ -1453,6 +1586,11 @@ export function MindmapEditor(props: MindmapEditorProps) {
                 保存失败：{saveError}
               </div>
             ) : null}
+            {uiSaveError ? (
+              <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
+                视图状态保存失败：{uiSaveError}
+              </div>
+            ) : null}
             {positionSaveError ? (
               <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
                 位置保存失败：{positionSaveError}
@@ -1478,8 +1616,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
                 onPersistNodePosition={onPersistNodePosition}
                 onRequestEditNodeId={onRequestEditNodeId}
                 onSelectNodeId={setSelectedNodeId}
+                onViewportChangeEnd={setViewport}
                 selectedNodeId={selectedNodeId}
                 state={state}
+                defaultViewport={viewport}
               />
             </div>
           </div>

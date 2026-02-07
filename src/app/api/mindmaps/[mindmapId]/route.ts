@@ -1,11 +1,25 @@
 import { NextResponse } from "next/server";
 
+import { z } from "zod";
+
 import { nodeRowsToMindmapState } from "@/lib/mindmap/storage";
+import { MindmapViewportSchema } from "@/lib/mindmap/uiState";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 function jsonError(status: number, message: string, extra?: Record<string, unknown>) {
   return NextResponse.json({ ok: false, message, ...extra }, { status });
 }
+
+function isMissingUiStateSchema(error: { code?: string; message: string }): boolean {
+  if (error.code === "PGRST205") return true;
+  return /could not find the table/i.test(error.message);
+}
+
+const MindmapUiStateRowSchema = z.object({
+  collapsed_node_ids: z.array(z.string()).nullable(),
+  selected_node_id: z.string().nullable(),
+  viewport: z.unknown().nullable(),
+});
 
 export async function GET(
   _request: Request,
@@ -43,6 +57,42 @@ export async function GET(
   }
 
   const state = nodeRowsToMindmapState(mindmap.root_node_id, nodes ?? []);
+  const nodeIds = new Set((nodes ?? []).map((node) => node.id));
+
+  let ui: {
+    collapsedNodeIds: string[];
+    selectedNodeId: string | null;
+    viewport: z.infer<typeof MindmapViewportSchema> | null;
+  } | null = null;
+
+  const { data: uiRowRaw, error: uiError } = await supabase
+    .from("mindmap_ui_state")
+    .select("collapsed_node_ids,selected_node_id,viewport")
+    .eq("mindmap_id", mindmapId)
+    .maybeSingle();
+
+  if (uiError) {
+    if (!isMissingUiStateSchema(uiError)) {
+      return jsonError(500, "Failed to load mindmap UI state", { detail: uiError.message });
+    }
+  } else {
+    const uiRow = MindmapUiStateRowSchema.safeParse(uiRowRaw);
+    if (uiRow.success && uiRow.data) {
+      const collapsedNodeIds = (uiRow.data.collapsed_node_ids ?? []).filter((id) =>
+        nodeIds.has(id),
+      );
+      const selectedNodeId =
+        uiRow.data.selected_node_id && nodeIds.has(uiRow.data.selected_node_id)
+          ? uiRow.data.selected_node_id
+          : null;
+      const viewportParsed = MindmapViewportSchema.nullable().safeParse(uiRow.data.viewport);
+      ui = {
+        collapsedNodeIds,
+        selectedNodeId,
+        viewport: viewportParsed.success ? viewportParsed.data : null,
+      };
+    }
+  }
 
   return NextResponse.json({
     ok: true,
@@ -54,6 +104,7 @@ export async function GET(
       isPublic: mindmap.is_public,
       publicSlug: mindmap.public_slug,
     },
+    ui,
     state,
   });
 }

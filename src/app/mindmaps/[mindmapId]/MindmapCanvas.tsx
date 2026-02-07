@@ -28,6 +28,7 @@ import {
 import type { MindmapState } from "@/lib/mindmap/ops";
 import type { OperationHighlightKind } from "@/lib/mindmap/operationSummary";
 import { mindmapStateToFlow } from "@/lib/mindmap/flow";
+import type { MindmapViewport } from "@/lib/mindmap/uiState";
 
 type ExportResult = { ok: true } | { ok: false; message: string };
 
@@ -164,6 +165,8 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     selectedNodeId,
     onSelectNodeId,
     collapsedNodeIds,
+    defaultViewport,
+    onViewportChangeEnd,
     highlightByNodeId,
     editable = false,
     onPersistNodePosition,
@@ -176,6 +179,8 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     selectedNodeId: string | null;
     onSelectNodeId: (nodeId: string | null) => void;
     collapsedNodeIds?: ReadonlySet<string>;
+    defaultViewport?: MindmapViewport | null;
+    onViewportChangeEnd?: (viewport: MindmapViewport) => void;
     highlightByNodeId?: Readonly<Record<string, OperationHighlightKind>>;
     editable?: boolean;
     onPersistNodePosition?: (args: { nodeId: string; x: number; y: number }) => void;
@@ -346,7 +351,8 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     <div className="h-full w-full" ref={wrapperRef}>
       <ReactFlow
         edges={edges}
-        fitView
+        defaultViewport={defaultViewport ?? undefined}
+        fitView={!defaultViewport}
         nodes={nodes}
         nodesConnectable={false}
         nodesDraggable={editable}
@@ -354,6 +360,14 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
         nodeTypes={{ mindmapNode: MindmapNode }}
         onNodeDragStart={editable ? onNodeDragStart : undefined}
         onNodeDragStop={editable ? onNodeDragStop : undefined}
+        onMoveEnd={(event, viewport) => {
+          if (!event) return;
+          onViewportChangeEnd?.({
+            x: viewport.x,
+            y: viewport.y,
+            zoom: viewport.zoom,
+          });
+        }}
         onNodesChange={editable ? onNodesChange : undefined}
         onInit={(instance) => {
           reactFlowInstanceRef.current = instance;
