@@ -11,7 +11,7 @@ The system SHALL render a product marketing landing page at `/` that communicate
 
 ### Requirement: Primary CTA routes to `/try`
 
-The landing page MUST contain a single, prominent primary CTA labeled `立即体验（免登录）` that routes users to `/try`.
+The landing page MUST contain a prominent primary CTA in the hero section labeled `立即体验（免登录）` that routes users to `/try`.
 
 #### Scenario: User clicks the primary CTA
 
