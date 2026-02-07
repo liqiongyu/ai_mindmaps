@@ -524,13 +524,20 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   }, [apply, commit, selectedNodeId, state]);
 
   const onMoveNode = useCallback(
-    (args: { nodeId: string; newParentId: string }): boolean => {
+    (args: { nodeId: string; newParentId: string; index?: number }): boolean => {
       if (!state) return false;
 
-      const result = apply(
-        [{ type: "move_node", nodeId: args.nodeId, newParentId: args.newParentId }],
-        args.nodeId,
-      );
+      const operation: Operation =
+        args.index === undefined
+          ? { type: "move_node", nodeId: args.nodeId, newParentId: args.newParentId }
+          : {
+              type: "move_node",
+              nodeId: args.nodeId,
+              newParentId: args.newParentId,
+              index: args.index,
+            };
+
+      const result = apply([operation], args.nodeId);
       if (!result.ok) {
         globalThis.alert(result.message);
         return false;
@@ -970,7 +977,10 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
                 Export failed: {exportError}
               </div>
             ) : null}
-            <div className="min-h-0 flex-1">
+            <div className="relative min-h-0 flex-1">
+              <div className="pointer-events-none absolute top-3 right-3 z-10 rounded-md border border-zinc-200 bg-white/90 px-2 py-1 text-[11px] text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-300">
+                Drag: reorder siblings · Drop on node: move under it
+              </div>
               <MindmapCanvas
                 ref={canvasRef}
                 collapsedNodeIds={collapsedNodeIds}

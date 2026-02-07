@@ -33,7 +33,7 @@ export type MindmapCanvasHandle = {
   exportSvg: (fileName: string) => Promise<ExportResult>;
 };
 
-type MoveNodeArgs = { nodeId: string; newParentId: string };
+type MoveNodeArgs = { nodeId: string; newParentId: string; index?: number };
 
 export const MindmapCanvas = forwardRef(function MindmapCanvas(
   {
@@ -185,17 +185,19 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
         return;
       }
 
+      const instanceNodes = instance.getNodes();
+      const nodesById = new Map(instanceNodes.map((n) => [n.id, n]));
+      const movedNode = nodesById.get(node.id) ?? node;
+      const movedRect = nodeToRect(movedNode);
+      const movedCenterX = movedRect.x + movedRect.width / 2;
+      const movedCenterY = movedRect.y + movedRect.height / 2;
+
       const intersections = instance
-        .getIntersectingNodes(node, true)
-        .filter((candidate) => candidate.id !== node.id);
+        .getIntersectingNodes(movedNode, true)
+        .filter((candidate) => candidate.id !== movedNode.id);
 
-      if (intersections.length === 0) {
-        setNodes(layoutNodes);
-        return;
-      }
-
-      const movedRect = nodeToRect(node);
-      const pickTarget = () => {
+      const pickIntersectionTarget = () => {
+        if (intersections.length === 0) return null;
         if (movedRect.width <= 0 || movedRect.height <= 0) {
           return intersections.length === 1 ? intersections[0] : null;
         }
@@ -214,18 +216,93 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
         return best && bestArea >= threshold ? best : null;
       };
 
-      const target = pickTarget();
-      if (!target) {
+      const intersectionTarget = pickIntersectionTarget();
+
+      const pickNearestTarget = () => {
+        const maxDistance = 140;
+        let best: Node | null = null;
+        let bestDistanceSq = maxDistance * maxDistance;
+        for (const candidate of instanceNodes) {
+          if (candidate.id === movedNode.id) continue;
+          const rect = nodeToRect(candidate);
+          const centerX = rect.x + rect.width / 2;
+          const centerY = rect.y + rect.height / 2;
+          const dx = movedCenterX - centerX;
+          const dy = movedCenterY - centerY;
+          const distanceSq = dx * dx + dy * dy;
+          if (distanceSq < bestDistanceSq) {
+            bestDistanceSq = distanceSq;
+            best = candidate;
+          }
+        }
+        return best;
+      };
+
+      const target = intersectionTarget ?? pickNearestTarget();
+      const targetModel = target ? state.nodesById[target.id] : null;
+      const isSiblingTarget =
+        targetModel?.parentId && source.parentId && targetModel.parentId === source.parentId;
+      const isParentTarget = target?.id === source.parentId;
+
+      if (target && !isSiblingTarget && !isParentTarget) {
+        const moved = onMoveNode({ nodeId: source.id, newParentId: target.id });
+        if (moved) return;
         setNodes(layoutNodes);
         return;
       }
 
-      if (target.id === source.parentId) {
+      if (!source.parentId) {
         setNodes(layoutNodes);
         return;
       }
 
-      const moved = onMoveNode({ nodeId: source.id, newParentId: target.id });
+      const layoutNode = layoutNodes.find((n) => n.id === source.id) ?? null;
+      if (layoutNode && Math.abs(movedNode.position.x - layoutNode.position.x) > 240) {
+        setNodes(layoutNodes);
+        return;
+      }
+
+      const siblings = Object.values(state.nodesById)
+        .filter((n) => n.parentId === source.parentId)
+        .sort((a, b) => a.orderIndex - b.orderIndex);
+
+      if (siblings.length <= 1) {
+        setNodes(layoutNodes);
+        return;
+      }
+
+      const currentIndex = siblings.findIndex((n) => n.id === source.id);
+      if (currentIndex < 0) {
+        setNodes(layoutNodes);
+        return;
+      }
+
+      const siblingIds = siblings.filter((n) => n.id !== source.id).map((n) => n.id);
+      const siblingCenters = siblingIds.map((id) => {
+        const siblingNode = nodesById.get(id);
+        if (!siblingNode) return { id, centerY: 0 };
+        const rect = nodeToRect(siblingNode);
+        return { id, centerY: rect.y + rect.height / 2 };
+      });
+
+      let insertIndex = siblingCenters.length;
+      for (let i = 0; i < siblingCenters.length; i += 1) {
+        if (movedCenterY < siblingCenters[i].centerY) {
+          insertIndex = i;
+          break;
+        }
+      }
+
+      if (insertIndex === currentIndex) {
+        setNodes(layoutNodes);
+        return;
+      }
+
+      const moved = onMoveNode({
+        nodeId: source.id,
+        newParentId: source.parentId,
+        index: insertIndex,
+      });
       if (!moved) {
         setNodes(layoutNodes);
       }

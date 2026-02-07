@@ -77,7 +77,7 @@ GitHub 分支保护需要仓库管理员权限。下面命令使用 `gh api` 调
 
 说明：
 
-- 必须通过 CI
+- 必须通过 CI（以及安全检查）
 - 必须走 PR
 - 禁止 force push
 - 可按团队情况调整 required approving reviews 数量
@@ -89,23 +89,21 @@ BRANCH="main"
 
 gh api -X PUT "repos/$OWNER/$REPO/branches/$BRANCH/protection" \
   -H "Accept: application/vnd.github+json" \
-  -f required_status_checks.strict=true \
-  -f required_pull_request_reviews.dismiss_stale_reviews=true \
-  -f required_pull_request_reviews.required_approving_review_count=1 \
-  -f enforce_admins=true \
-  -f restrictions=
+  -F required_status_checks[strict]=true \
+  -F required_status_checks[contexts][]=CI \
+  -F required_status_checks[contexts][]="Dependency Review" \
+  -F required_status_checks[contexts][]=Vercel \
+  -F required_pull_request_reviews[dismiss_stale_reviews]=true \
+  -F required_pull_request_reviews[required_approving_review_count]=0 \
+  -F required_conversation_resolution=true \
+  -F required_linear_history=true \
+  -F enforce_admins=true \
+  -F allow_force_pushes=false \
+  -F allow_deletions=false \
+  -F restrictions=null
 ```
 
-把 CI 的检查名称填入 required_status_checks：
-
-```bash
-gh api -X PUT "repos/$OWNER/$REPO/branches/$BRANCH/protection/required_status_checks" \
-  -H "Accept: application/vnd.github+json" \
-  -f strict=true \
-  -F contexts[]="CI"
-```
-
-> 注意：`contexts[]` 必须与 workflow 中 job 的 check name 一致（本仓库默认是 `CI`）。
+> 注意：`contexts[]` 必须与 GitHub Checks 里的名字完全一致（大小写也要一致）。
 
 ---
 
@@ -118,6 +116,11 @@ gh api -X PUT "repos/$OWNER/$REPO/branches/$BRANCH/protection/required_status_ch
 - `MMA_LLM_API_KEY`
 - `MMA_LLM_BASE_URL`（可选，OpenAI-compatible 时用）
 - `MMA_LLM_MODEL`
+- `OPENAI_API_KEY`（用于 Azure OpenAI e2e）
+- `AZURE_OPENAI_ENDPOINT`（用于 Azure OpenAI e2e）
+- `AZURE_OPENAI_DEPLOYMENT`（用于 Azure OpenAI e2e）
+- `AZURE_OPENAI_API_VERSION`（可选，用于 Azure OpenAI e2e）
+- `AZURE_OPENAI_MODEL`（可选，用于 Azure OpenAI e2e）
 
 设置示例：
 
