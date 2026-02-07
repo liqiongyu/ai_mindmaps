@@ -20,26 +20,59 @@ jobs:
     name: Azure OpenAI (e2e)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: ${{ secrets.OPENAI_API_KEY != '' && secrets.AZURE_OPENAI_ENDPOINT != '' && secrets.AZURE_OPENAI_DEPLOYMENT != '' }}
     steps:
+      - name: Check required secrets
+        id: guard
+        run: |
+          missing=0
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "Missing OPENAI_API_KEY" >&2
+            missing=1
+          fi
+          if [ -z "${AZURE_OPENAI_ENDPOINT}" ]; then
+            echo "Missing AZURE_OPENAI_ENDPOINT" >&2
+            missing=1
+          fi
+          if [ -z "${AZURE_OPENAI_DEPLOYMENT}" ]; then
+            echo "Missing AZURE_OPENAI_DEPLOYMENT" >&2
+            missing=1
+          fi
+
+          if [ "${missing}" -eq 1 ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping E2E: required secrets not set."
+            exit 0
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+
       - name: Checkout
+        if: ${{ steps.guard.outputs.enabled == 'true' }}
         uses: actions/checkout@v4
 
       - name: Setup pnpm
+        if: ${{ steps.guard.outputs.enabled == 'true' }}
         uses: pnpm/action-setup@v4
         with:
           version: 10.28.2
 
       - name: Setup Node.js
+        if: ${{ steps.guard.outputs.enabled == 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install
+        if: ${{ steps.guard.outputs.enabled == 'true' }}
         run: pnpm install --frozen-lockfile
 
       - name: Run e2e tests
+        if: ${{ steps.guard.outputs.enabled == 'true' }}
         run: pnpm -s test:e2e
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
