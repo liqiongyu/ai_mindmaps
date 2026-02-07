@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MindmapChatSidebar } from "./MindmapChatSidebar";
 import { MindmapCanvas, type MindmapCanvasHandle } from "./MindmapCanvas";
+import { MindmapNodeInspectorModal } from "./MindmapNodeInspectorModal";
 
 import type { MindmapState, Operation } from "@/lib/mindmap/ops";
 import { applyOperations } from "@/lib/mindmap/ops";
@@ -43,6 +44,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState<"png" | "svg" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
 
   const stateRef = useRef<MindmapState | null>(state);
   const canvasRef = useRef<MindmapCanvasHandle | null>(null);
@@ -81,6 +83,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSharing(false);
     setExportError(null);
     setExporting(null);
+    setInspectorOpen(false);
     setSaveStatus("loading");
     setHistory(null);
     stateRef.current = null;
@@ -176,6 +179,11 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     };
   }, [loadError, persistedMindmapId, state]);
 
+  useEffect(() => {
+    if (!inspectorOpen) return;
+    setInspectorOpen(false);
+  }, [inspectorOpen, selectedNodeId]);
+
   const commit = useCallback((nextState: MindmapState) => {
     stateRef.current = nextState;
     setHistory((current) => {
@@ -265,25 +273,11 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSelectedNodeId(result.nextSelectedNodeId);
   }, [apply, commit, selectedNodeId, state]);
 
-  const onRename = useCallback(() => {
-    if (!state) return;
+  const onOpenInspector = useCallback(() => {
     if (!selectedNodeId) return;
-    const current = state.nodesById[selectedNodeId];
-    if (!current) return;
-
-    const text = globalThis.prompt("Rename node", current.text);
-    const title = text?.trim();
-    if (!title) return;
-
-    const result = apply(
-      [{ type: "rename_node", nodeId: selectedNodeId, text: title }],
-      selectedNodeId,
-    );
-    if (!result.ok) return globalThis.alert(result.message);
-
-    commit(result.nextState);
-    setSelectedNodeId(result.nextSelectedNodeId);
-  }, [apply, commit, selectedNodeId, state]);
+    if (!stateRef.current?.nodesById[selectedNodeId]) return;
+    setInspectorOpen(true);
+  }, [selectedNodeId]);
 
   const onDelete = useCallback(() => {
     if (!state) return;
@@ -319,6 +313,50 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
         return { ok: true as const };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to apply operations";
+        return { ok: false as const, message };
+      }
+    },
+    [commit],
+  );
+
+  const onSaveNodeDetails = useCallback(
+    async ({ nodeId, title, notes }: { nodeId: string; title: string; notes: string }) => {
+      const current = stateRef.current;
+      if (!current) {
+        return { ok: false as const, message: "Mindmap not loaded yet" };
+      }
+
+      const node = current.nodesById[nodeId];
+      if (!node) {
+        return { ok: false as const, message: "Node not found" };
+      }
+
+      const nextTitle = title.trim();
+      if (!nextTitle) {
+        return { ok: false as const, message: "Title is required" };
+      }
+
+      const operations: Operation[] = [];
+      if (nextTitle !== node.text) {
+        operations.push({ type: "rename_node", nodeId, text: nextTitle });
+      }
+
+      const currentNotes = node.notes ?? "";
+      if (notes !== currentNotes) {
+        operations.push({ type: "update_notes", nodeId, notes });
+      }
+
+      if (operations.length === 0) {
+        return { ok: true as const };
+      }
+
+      try {
+        const next = applyOperations(current, operations);
+        commit(next);
+        setSelectedNodeId(next.nodesById[nodeId] ? nodeId : next.rootNodeId);
+        return { ok: true as const };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to apply node edits";
         return { ok: false as const, message };
       }
     },
@@ -447,10 +485,10 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
             disabled={!state || !selectedNodeId}
-            onClick={onRename}
+            onClick={onOpenInspector}
             type="button"
           >
-            Rename
+            Details
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
@@ -562,6 +600,16 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
           ) : null}
         </div>
       )}
+
+      {inspectorOpen && selectedNodeId && selectedNode ? (
+        <MindmapNodeInspectorModal
+          initialNotes={selectedNode.notes}
+          initialTitle={selectedNode.text}
+          nodeId={selectedNodeId}
+          onClose={() => setInspectorOpen(false)}
+          onSave={onSaveNodeDetails}
+        />
+      ) : null}
     </main>
   );
 }
