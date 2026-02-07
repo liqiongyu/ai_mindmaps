@@ -89,6 +89,11 @@ export function MindmapsListClient({ initialMindmaps }: { initialMindmaps: Mindm
                   Updated: {new Date(m.updatedAt).toLocaleString()}
                 </div>
               </div>
+              {m.isPublic && m.publicSlug ? (
+                <Link className="text-xs underline" href={`/public/${m.publicSlug}`}>
+                  View share
+                </Link>
+              ) : null}
             </li>
           ))}
         </ul>
