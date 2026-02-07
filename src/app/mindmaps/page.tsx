@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { MindmapsListClient } from "./MindmapsListClient";
 import { SignOutButton } from "./SignOutButton";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -13,6 +13,12 @@ export default async function MindmapsPage() {
     redirect("/login");
   }
 
+  const { data: mindmaps, error: mindmapsError } = await supabase
+    .from("mindmaps")
+    .select("id,title,updated_at,is_public,public_slug")
+    .eq("owner_id", data.user.id)
+    .order("updated_at", { ascending: false });
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-6 py-16">
       <header className="flex items-start justify-between gap-4">
@@ -23,16 +29,23 @@ export default async function MindmapsPage() {
         <SignOutButton />
       </header>
 
-      <div className="flex flex-col gap-2 text-sm">
-        <Link className="underline" href="/mindmaps/demo">
-          Open demo editor
-        </Link>
-      </div>
-
-      <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
-        Persistence is not implemented yet. Next step: create mindmaps in Supabase and load/save
-        them here.
-      </div>
+      {mindmapsError ? (
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200">
+          Failed to load mindmaps: {mindmapsError.message}
+        </div>
+      ) : (
+        <MindmapsListClient
+          initialMindmaps={
+            mindmaps?.map((m) => ({
+              id: m.id,
+              title: m.title,
+              updatedAt: m.updated_at,
+              isPublic: m.is_public,
+              publicSlug: m.public_slug,
+            })) ?? []
+          }
+        />
+      )}
     </main>
   );
 }

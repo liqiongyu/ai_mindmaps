@@ -1,15 +1,10 @@
 import { redirect } from "next/navigation";
 
-import { MindmapEditor } from "./MindmapEditor";
+import { MindmapEditor } from "../[mindmapId]/MindmapEditor";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export default async function MindmapEditorPage({
-  params,
-}: {
-  params: Promise<{ mindmapId: string }>;
-}) {
-  const { mindmapId } = await params;
+export default async function MindmapDemoPage() {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.getUser();
 
@@ -17,5 +12,5 @@ export default async function MindmapEditorPage({
     redirect("/login");
   }
 
-  return <MindmapEditor mindmapId={mindmapId} mode="persisted" />;
+  return <MindmapEditor mode="demo" />;
 }
