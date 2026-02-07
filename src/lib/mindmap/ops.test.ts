@@ -26,6 +26,44 @@ describe("applyOperations", () => {
     expect(children).toEqual(["a", "c", "b"]);
   });
 
+  test("rename_node updates node text", () => {
+    const state = {
+      rootNodeId: "root",
+      nodesById: {
+        root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
+        a: { id: "a", parentId: "root", text: "A", notes: null, orderIndex: 0 },
+      },
+    };
+
+    const next = applyOperations(state, [{ type: "rename_node", nodeId: "a", text: "Renamed" }]);
+    expect(next.nodesById.a.text).toBe("Renamed");
+  });
+
+  test("delete_node removes subtree and normalizes orderIndex", () => {
+    const state = {
+      rootNodeId: "root",
+      nodesById: {
+        root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
+        a: { id: "a", parentId: "root", text: "A", notes: null, orderIndex: 0 },
+        b: { id: "b", parentId: "root", text: "B", notes: null, orderIndex: 1 },
+        c: { id: "c", parentId: "root", text: "C", notes: null, orderIndex: 2 },
+        b1: { id: "b1", parentId: "b", text: "B1", notes: null, orderIndex: 0 },
+      },
+    };
+
+    const next = applyOperations(state, [{ type: "delete_node", nodeId: "b" }]);
+
+    expect(next.nodesById.b).toBeUndefined();
+    expect(next.nodesById.b1).toBeUndefined();
+
+    const children = Object.values(next.nodesById)
+      .filter((n) => n.parentId === "root")
+      .sort((x, y) => x.orderIndex - y.orderIndex);
+
+    expect(children.map((n) => n.id)).toEqual(["a", "c"]);
+    expect(children.map((n) => n.orderIndex)).toEqual([0, 1]);
+  });
+
   test("move_node rejects moving into descendant", () => {
     const state = {
       rootNodeId: "root",
