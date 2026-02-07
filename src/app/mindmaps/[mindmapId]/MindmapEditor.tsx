@@ -51,6 +51,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSeqRef = useRef(0);
   const skipNextSaveRef = useRef(false);
+  const pendingSaveRef = useRef(false);
 
   const selectedNode = state && selectedNodeId ? state.nodesById[selectedNodeId] : null;
 
@@ -127,6 +128,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSaveStatus("loading");
     setHistory(null);
     stateRef.current = null;
+    pendingSaveRef.current = false;
     setSelectedNodeId(null);
 
     (async () => {
@@ -183,6 +185,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
 
     setSaveStatus("saving");
     setSaveError(null);
+    pendingSaveRef.current = true;
     const seq = (saveSeqRef.current += 1);
 
     saveTimerRef.current = setTimeout(async () => {
@@ -204,6 +207,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
           );
         }
 
+        pendingSaveRef.current = false;
         setSaveStatus("saved");
         setSaveError(null);
       } catch (err) {
@@ -218,6 +222,45 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, [loadError, persistedMindmapId, state]);
+
+  useEffect(() => {
+    if (!persistedMindmapId) return;
+
+    const flush = () => {
+      if (!pendingSaveRef.current) return;
+      const current = stateRef.current;
+      if (!current) return;
+
+      const url = `/api/mindmaps/${persistedMindmapId}/save`;
+      const body = JSON.stringify({ state: current });
+
+      try {
+        const blob = new Blob([body], { type: "application/json" });
+        if (navigator.sendBeacon?.(url, blob)) {
+          return;
+        }
+      } catch {
+        // Ignore and fallback to fetch keepalive.
+      }
+
+      try {
+        void fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+          keepalive: true,
+        });
+      } catch {
+        // Ignore best-effort flush errors.
+      }
+    };
+
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [persistedMindmapId]);
 
   useEffect(() => {
     if (!inspectorOpen) return;
