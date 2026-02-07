@@ -100,6 +100,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const saveSeqRef = useRef(0);
   const skipNextSaveRef = useRef(false);
   const pendingSaveRef = useRef(false);
+  const tryDraftJsonRef = useRef<string | null>(null);
 
   const selectedNode = state && selectedNodeId ? state.nodesById[selectedNodeId] : null;
 
@@ -316,20 +317,35 @@ export function MindmapEditor(props: MindmapEditorProps) {
     setSaveStatus("saving");
     setSaveError(null);
     const seq = (saveSeqRef.current += 1);
+    pendingSaveRef.current = true;
+
+    try {
+      const draft = {
+        state,
+        updatedAt: new Date().toISOString(),
+        ui: {
+          collapsedNodeIds: Array.from(collapsedNodeIds),
+          selectedNodeId,
+        },
+      };
+      tryDraftJsonRef.current = stringifyTryDraft(draft);
+    } catch (err) {
+      pendingSaveRef.current = false;
+      tryDraftJsonRef.current = null;
+      const message = err instanceof Error ? err.message : "Local save failed";
+      setSaveStatus("error");
+      setSaveError(message);
+      return;
+    }
 
     saveTimerRef.current = setTimeout(() => {
       if (saveSeqRef.current !== seq) return;
+      const json = tryDraftJsonRef.current;
+      if (!json) return;
 
       try {
-        const draft = {
-          state,
-          updatedAt: new Date().toISOString(),
-          ui: {
-            collapsedNodeIds: Array.from(collapsedNodeIds),
-            selectedNodeId,
-          },
-        };
-        localStorage.setItem(TRY_DRAFT_STORAGE_KEY, stringifyTryDraft(draft));
+        localStorage.setItem(TRY_DRAFT_STORAGE_KEY, json);
+        pendingSaveRef.current = false;
         setSaveStatus("saved");
         setSaveError(null);
       } catch (err) {
@@ -382,6 +398,28 @@ export function MindmapEditor(props: MindmapEditorProps) {
       flush();
     };
   }, [persistedMindmapId]);
+
+  useEffect(() => {
+    if (props.mode !== "try") return;
+
+    const flush = () => {
+      if (!pendingSaveRef.current) return;
+      const json = tryDraftJsonRef.current;
+      if (!json) return;
+      try {
+        localStorage.setItem(TRY_DRAFT_STORAGE_KEY, json);
+        pendingSaveRef.current = false;
+      } catch {
+        // Ignore best-effort flush errors.
+      }
+    };
+
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [props.mode]);
 
   useEffect(() => {
     if (!inspectorOpenRef.current) return;
