@@ -3,6 +3,7 @@
 AI 对话式思维导图工具：通过自然语言对话协作生成与完善思维导图，并保留可视化编辑、分享与导出能力。
 
 - PRD：`docs/prd.md`
+- P0/P1 执行清单（体验与转化）：`docs/p0-p1-execution-plan.md`
 - GitHub/`gh` 操作：`docs/github-cli.md`
 - 发布流程：`docs/release.md`
 
