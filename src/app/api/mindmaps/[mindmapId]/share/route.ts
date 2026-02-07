@@ -47,3 +47,33 @@ export async function POST(
 
   return jsonError(500, "Failed to generate a unique public slug");
 }
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ mindmapId: string }> },
+) {
+  const { mindmapId } = await params;
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.auth.getUser();
+
+  if (error || !data.user) {
+    return jsonError(401, "Unauthorized");
+  }
+
+  const { data: updated, error: updateError } = await supabase
+    .from("mindmaps")
+    .update({ is_public: false, public_slug: null })
+    .eq("id", mindmapId)
+    .eq("owner_id", data.user.id)
+    .select("id")
+    .maybeSingle();
+
+  if (updateError) {
+    return jsonError(500, "Failed to stop sharing mindmap", { detail: updateError.message });
+  }
+  if (!updated) {
+    return jsonError(404, "Mindmap not found");
+  }
+
+  return NextResponse.json({ ok: true });
+}
