@@ -35,7 +35,10 @@ export function MindmapNodeInspectorModal({
   }, [initialNotes, initialTitle, nodeId]);
 
   useEffect(() => {
-    titleRef.current?.focus();
+    const input = titleRef.current;
+    if (!input) return;
+    input.focus();
+    input.select();
   }, [nodeId]);
 
   const onSaveClick = useCallback(async () => {
