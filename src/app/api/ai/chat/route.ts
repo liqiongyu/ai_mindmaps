@@ -486,6 +486,7 @@ export async function POST(request: Request) {
     return jsonError(400, "selectedNodeId is required for node-scoped chat");
   }
 
+  const provider = "azure-openai" as const;
   const nodeId = scope === "node" ? (selectedNodeId ?? null) : null;
   const threadIdResult = await getOrCreateThreadId({ supabase, mindmapId, scope, nodeId });
 
@@ -504,7 +505,7 @@ export async function POST(request: Request) {
         role: "assistant",
         content: modelOutput.assistant_message,
         operations: modelOutput.operations,
-        provider: "azure-openai",
+        provider,
         model: modelName || null,
       },
     ]);
@@ -520,5 +521,7 @@ export async function POST(request: Request) {
     ok: true,
     assistant_message: modelOutput.assistant_message,
     operations: modelOutput.operations,
+    provider,
+    model: modelName || null,
   });
 }
