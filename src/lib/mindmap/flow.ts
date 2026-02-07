@@ -17,9 +17,14 @@ export type MindmapFlowGraph = {
   edges: Edge[];
 };
 
-export function mindmapStateToFlow(state: MindmapState): MindmapFlowGraph {
+export function mindmapStateToFlow(
+  state: MindmapState,
+  options?: { collapsedNodeIds?: ReadonlySet<string> },
+): MindmapFlowGraph {
   const childrenByParentId = indexChildren(state.nodesById);
-  const root = hierarchy<TreeNode>(buildTree(state.rootNodeId, childrenByParentId));
+  const root = hierarchy<TreeNode>(
+    buildTree(state.rootNodeId, childrenByParentId, options?.collapsedNodeIds),
+  );
 
   const layout = tree<TreeNode>().nodeSize([100, 260]);
   const laidOut = layout(root);
@@ -69,8 +74,16 @@ function indexChildren(nodesById: Record<string, MindmapNode>): Record<string, M
   return childrenByParentId;
 }
 
-function buildTree(nodeId: string, childrenByParentId: Record<string, MindmapNode[]>): TreeNode {
+function buildTree(
+  nodeId: string,
+  childrenByParentId: Record<string, MindmapNode[]>,
+  collapsedNodeIds?: ReadonlySet<string>,
+): TreeNode {
+  if (collapsedNodeIds?.has(nodeId)) return { id: nodeId };
   const children = childrenByParentId[nodeId];
   if (!children?.length) return { id: nodeId };
-  return { id: nodeId, children: children.map((child) => buildTree(child.id, childrenByParentId)) };
+  return {
+    id: nodeId,
+    children: children.map((child) => buildTree(child.id, childrenByParentId, collapsedNodeIds)),
+  };
 }
