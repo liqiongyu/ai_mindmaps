@@ -49,6 +49,7 @@ pnpm dev
 - Vercel operations: use Vercel MCP (`mcp__vercel__*`) for deploys, logs, and project settings.
 - Supabase operations: use Supabase MCP (`mcp__supabase__*`) for SQL, migrations, and Edge Functions.
 - E2E automation for new features: use Chrome DevTools MCP (`mcp__chrome-devtools__*`) to run/record browser flows.
+- Default: try MCP/tools or existing API routes first; only ask the user to do manual console/dashboard steps when MCP/API is blocked (auth/permissions/unsupported action).
 
 ## Security & Configuration Tips
 
