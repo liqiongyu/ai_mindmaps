@@ -54,6 +54,27 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
 
   const selectedNode = state && selectedNodeId ? state.nodesById[selectedNodeId] : null;
 
+  const siblingContext = useMemo(() => {
+    if (!state) return null;
+    if (!selectedNodeId) return null;
+    const node = state.nodesById[selectedNodeId];
+    if (!node?.parentId) return null;
+
+    const siblings = Object.values(state.nodesById)
+      .filter((n) => n.parentId === node.parentId)
+      .sort((a, b) => a.orderIndex - b.orderIndex);
+    const index = siblings.findIndex((n) => n.id === selectedNodeId);
+    if (index < 0) return null;
+
+    return { parentId: node.parentId, siblings, index };
+  }, [selectedNodeId, state]);
+
+  const canAddSibling = siblingContext !== null;
+  const canMoveUp = siblingContext ? siblingContext.index > 0 : false;
+  const canMoveDown = siblingContext
+    ? siblingContext.index < siblingContext.siblings.length - 1
+    : false;
+
   const selectedLabel = useMemo(() => {
     if (!selectedNodeId) return "none";
     return selectedNode?.text ?? selectedNodeId;
@@ -273,6 +294,72 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSelectedNodeId(result.nextSelectedNodeId);
   }, [apply, commit, selectedNodeId, state]);
 
+  const onAddSibling = useCallback(() => {
+    if (!state) return;
+    if (!selectedNodeId) return;
+    const selected = state.nodesById[selectedNodeId];
+    if (!selected) return;
+    if (!selected.parentId) {
+      return globalThis.alert("Cannot add sibling for root node");
+    }
+
+    const text = globalThis.prompt("New node title");
+    const title = text?.trim();
+    if (!title) return;
+
+    const nodeId = globalThis.crypto?.randomUUID?.() ?? `node_${Date.now()}`;
+    const result = apply(
+      [
+        {
+          type: "add_node",
+          nodeId,
+          parentId: selected.parentId,
+          text: title,
+          index: selected.orderIndex + 1,
+        },
+      ],
+      nodeId,
+    );
+    if (!result.ok) return globalThis.alert(result.message);
+
+    commit(result.nextState);
+    setSelectedNodeId(result.nextSelectedNodeId);
+  }, [apply, commit, selectedNodeId, state]);
+
+  const onMoveSibling = useCallback(
+    (direction: "up" | "down") => {
+      if (!state) return;
+      if (!selectedNodeId) return;
+      const selected = state.nodesById[selectedNodeId];
+      if (!selected?.parentId) return;
+
+      const siblings = Object.values(state.nodesById)
+        .filter((n) => n.parentId === selected.parentId)
+        .sort((a, b) => a.orderIndex - b.orderIndex);
+      const index = siblings.findIndex((n) => n.id === selectedNodeId);
+      if (index < 0) return;
+
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= siblings.length) return;
+
+      const orderedChildIds = siblings.map((n) => n.id);
+      [orderedChildIds[index], orderedChildIds[targetIndex]] = [
+        orderedChildIds[targetIndex],
+        orderedChildIds[index],
+      ];
+
+      const result = apply(
+        [{ type: "reorder_children", parentId: selected.parentId, orderedChildIds }],
+        selectedNodeId,
+      );
+      if (!result.ok) return globalThis.alert(result.message);
+
+      commit(result.nextState);
+      setSelectedNodeId(result.nextSelectedNodeId);
+    },
+    [apply, commit, selectedNodeId, state],
+  );
+
   const onOpenInspector = useCallback(() => {
     if (!selectedNodeId) return;
     if (!stateRef.current?.nodesById[selectedNodeId]) return;
@@ -475,12 +562,36 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
             Redo
           </button>
           <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
             disabled={!state}
             onClick={onAddChild}
             type="button"
           >
             Add child
+          </button>
+          <button
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            disabled={!state || !canAddSibling}
+            onClick={onAddSibling}
+            type="button"
+          >
+            Add sibling
+          </button>
+          <button
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            disabled={!state || !canMoveUp}
+            onClick={() => onMoveSibling("up")}
+            type="button"
+          >
+            Move up
+          </button>
+          <button
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            disabled={!state || !canMoveDown}
+            onClick={() => onMoveSibling("down")}
+            type="button"
+          >
+            Move down
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
