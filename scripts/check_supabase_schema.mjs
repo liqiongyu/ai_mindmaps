@@ -19,7 +19,7 @@ const supabase = createClient(url, anonKey, {
   },
 });
 
-const tables = ["mindmaps", "mindmap_nodes"];
+const tables = ["mindmaps", "mindmap_nodes", "chat_threads", "chat_messages"];
 let allOk = true;
 
 for (const table of tables) {
@@ -29,8 +29,24 @@ for (const table of tables) {
     continue;
   }
 
-  allOk = false;
   const code = error.code ?? "unknown";
+
+  if (code === "PGRST205") {
+    allOk = false;
+    console.error(`${table}: ERROR ${code} - ${error.message}`);
+    continue;
+  }
+
+  if (
+    code === "42501" ||
+    /permission denied/i.test(error.message) ||
+    /row-level security/i.test(error.message)
+  ) {
+    console.log(`${table}: OK (exists, but not readable without auth)`);
+    continue;
+  }
+
+  allOk = false;
   console.error(`${table}: ERROR ${code} - ${error.message}`);
 }
 

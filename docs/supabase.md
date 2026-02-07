@@ -16,6 +16,7 @@ Set these in `.env.local` (see `.env.example`):
 3. Paste the contents of:
    - `supabase/migrations/20260207000000_mindmap_storage.sql`
    - `supabase/migrations/20260207010000_mma_atomic_save.sql`
+   - `supabase/migrations/20260207020000_mma_chat_persistence.sql`
 4. Run the query
 
 After this, the project has:
