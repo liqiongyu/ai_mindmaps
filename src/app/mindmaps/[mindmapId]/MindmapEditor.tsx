@@ -333,11 +333,18 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     const onKeyDown = (event: KeyboardEvent) => {
       const { target } = event;
       if (target instanceof HTMLElement) {
-        const tag = target.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+        if (target.closest("input, textarea, select, button, a") || target.isContentEditable) {
+          return;
+        }
       }
 
-      if (event.key === "Enter") {
+      if (
+        event.key === "Enter" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
         const currentSelectedNodeId = selectedNodeId;
         if (!currentSelectedNodeId) return;
         if (!stateRef.current?.nodesById[currentSelectedNodeId]) return;
