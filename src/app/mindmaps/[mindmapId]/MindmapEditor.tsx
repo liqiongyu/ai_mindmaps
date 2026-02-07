@@ -41,6 +41,19 @@ type SaveStatus = "idle" | "loading" | "saving" | "saved" | "error";
 const MAX_HISTORY_PAST = 50;
 const NEW_NODE_DEFAULT_TITLE = "新节点";
 
+const TOOLBAR_GROUP_CLASS_NAME =
+  "flex items-center gap-1 rounded-md border border-zinc-200 bg-white/80 p-1 dark:border-zinc-800 dark:bg-zinc-950/50";
+const TOOLBAR_GROUP_LABEL_CLASS_NAME =
+  "select-none px-2 text-[11px] font-medium text-zinc-500 dark:text-zinc-400";
+const TOOLBAR_BUTTON_CLASS_NAME =
+  "rounded-md px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-zinc-900";
+const TOOLBAR_MENU_SUMMARY_CLASS_NAME =
+  "flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-zinc-200 bg-white/80 text-sm text-zinc-700 select-none hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-200 dark:hover:bg-zinc-900 [&::-webkit-details-marker]:hidden";
+const TOOLBAR_MENU_PANEL_CLASS_NAME =
+  "absolute right-0 z-20 mt-2 w-48 rounded-md border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-950";
+const TOOLBAR_MENU_ITEM_DANGER_CLASS_NAME =
+  "w-full rounded-md px-2 py-2 text-left text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:text-red-200 dark:hover:bg-red-950/30";
+
 type MindmapEditorProps =
   | { mode: "demo" }
   | { mode: "try" }
@@ -119,6 +132,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const pendingSaveRef = useRef(false);
   const tryDraftJsonRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dangerMenuRef = useRef<HTMLDetailsElement | null>(null);
 
   const selectedNode = state && selectedNodeId ? state.nodesById[selectedNodeId] : null;
 
@@ -1172,123 +1186,170 @@ export function MindmapEditor(props: MindmapEditorProps) {
             选中：{selectedLabel}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || !canUndo}
-            onClick={onUndo}
-            title="撤销 (⌘Z / Ctrl+Z)"
-            type="button"
-          >
-            撤销
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || !canRedo}
-            onClick={onRedo}
-            title="重做 (⌘⇧Z / Ctrl+Y)"
-            type="button"
-          >
-            重做
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state}
-            onClick={onAddChild}
-            type="button"
-          >
-            新增子节点
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || !canAddSibling}
-            onClick={onAddSibling}
-            type="button"
-          >
-            新增同级
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || !canIndent}
-            onClick={onIndent}
-            type="button"
-          >
-            缩进
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || !canOutdent}
-            onClick={onOutdent}
-            type="button"
-          >
-            取消缩进
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || !canMoveUp}
-            onClick={() => onMoveSibling("up")}
-            type="button"
-          >
-            上移
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || !canMoveDown}
-            onClick={() => onMoveSibling("down")}
-            type="button"
-          >
-            下移
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || !canToggleCollapse}
-            onClick={onToggleCollapse}
-            type="button"
-          >
-            {selectedIsCollapsed ? "展开" : "折叠"}
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || !selectedNodeId}
-            onClick={onOpenInspector}
-            type="button"
-          >
-            详情
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || !selectedNodeId || selectedNodeId === state.rootNodeId}
-            onClick={onDelete}
-            type="button"
-          >
-            删除
-          </button>
-          {persistedMindmapId ? (
-            <button
-              className="rounded-md border border-red-200 px-3 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:text-red-200 dark:hover:bg-red-950/30"
-              disabled={!state || deletingMindmap}
-              onClick={onDeleteMindmap}
-              type="button"
-            >
-              {deletingMindmap ? "删除中…" : "删除导图"}
-            </button>
-          ) : null}
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || exporting !== null}
-            onClick={() => onExport("png")}
-            type="button"
-          >
-            {exporting === "png" ? "导出中…" : "导出 PNG"}
-          </button>
-          <button
-            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            disabled={!state || exporting !== null}
-            onClick={() => onExport("svg")}
-            type="button"
-          >
-            {exporting === "svg" ? "导出中…" : "导出 SVG"}
-          </button>
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+            <div className={TOOLBAR_GROUP_CLASS_NAME}>
+              <span className={TOOLBAR_GROUP_LABEL_CLASS_NAME}>编辑</span>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || !canUndo}
+                onClick={onUndo}
+                title="撤销 (⌘Z / Ctrl+Z)"
+                type="button"
+              >
+                撤销
+              </button>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || !canRedo}
+                onClick={onRedo}
+                title="重做 (⌘⇧Z / Ctrl+Y)"
+                type="button"
+              >
+                重做
+              </button>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || !selectedNodeId}
+                onClick={onOpenInspector}
+                title="详情"
+                type="button"
+              >
+                详情
+              </button>
+            </div>
+
+            <div className={TOOLBAR_GROUP_CLASS_NAME}>
+              <span className={TOOLBAR_GROUP_LABEL_CLASS_NAME}>结构</span>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state}
+                onClick={onAddChild}
+                title="新增子节点 (Enter)"
+                type="button"
+              >
+                新增子节点
+              </button>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || !canAddSibling}
+                onClick={onAddSibling}
+                title="新增同级 (Tab)"
+                type="button"
+              >
+                新增同级
+              </button>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || !canIndent}
+                onClick={onIndent}
+                title="缩进"
+                type="button"
+              >
+                缩进
+              </button>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || !canOutdent}
+                onClick={onOutdent}
+                title="取消缩进"
+                type="button"
+              >
+                取消缩进
+              </button>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || !canMoveUp}
+                onClick={() => onMoveSibling("up")}
+                title="上移"
+                type="button"
+              >
+                上移
+              </button>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || !canMoveDown}
+                onClick={() => onMoveSibling("down")}
+                title="下移"
+                type="button"
+              >
+                下移
+              </button>
+            </div>
+
+            <div className={TOOLBAR_GROUP_CLASS_NAME}>
+              <span className={TOOLBAR_GROUP_LABEL_CLASS_NAME}>视图</span>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || !canToggleCollapse}
+                onClick={onToggleCollapse}
+                title={selectedIsCollapsed ? "展开" : "折叠"}
+                type="button"
+              >
+                {selectedIsCollapsed ? "展开" : "折叠"}
+              </button>
+            </div>
+
+            <div className={TOOLBAR_GROUP_CLASS_NAME}>
+              <span className={TOOLBAR_GROUP_LABEL_CLASS_NAME}>导出</span>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || exporting !== null}
+                onClick={() => onExport("png")}
+                title="导出 PNG"
+                type="button"
+              >
+                {exporting === "png" ? "导出中…" : "导出 PNG"}
+              </button>
+              <button
+                className={TOOLBAR_BUTTON_CLASS_NAME}
+                disabled={!state || exporting !== null}
+                onClick={() => onExport("svg")}
+                title="导出 SVG"
+                type="button"
+              >
+                {exporting === "svg" ? "导出中…" : "导出 SVG"}
+              </button>
+            </div>
+
+            <details className="relative" ref={dangerMenuRef}>
+              <summary
+                aria-label="更多操作"
+                className={TOOLBAR_MENU_SUMMARY_CLASS_NAME}
+                title="更多"
+              >
+                ⋯
+              </summary>
+              <div className={TOOLBAR_MENU_PANEL_CLASS_NAME}>
+                <button
+                  className={TOOLBAR_MENU_ITEM_DANGER_CLASS_NAME}
+                  disabled={!state || !selectedNodeId || selectedNodeId === state.rootNodeId}
+                  onClick={() => {
+                    if (dangerMenuRef.current) dangerMenuRef.current.open = false;
+                    onDelete();
+                  }}
+                  title="删除 (Backspace / Delete)"
+                  type="button"
+                >
+                  删除节点
+                </button>
+                {persistedMindmapId ? (
+                  <button
+                    className={TOOLBAR_MENU_ITEM_DANGER_CLASS_NAME}
+                    disabled={!state || deletingMindmap}
+                    onClick={() => {
+                      if (dangerMenuRef.current) dangerMenuRef.current.open = false;
+                      void onDeleteMindmap();
+                    }}
+                    title="删除导图"
+                    type="button"
+                  >
+                    {deletingMindmap ? "删除导图中…" : "删除导图"}
+                  </button>
+                ) : null}
+              </div>
+            </details>
+          </div>
         </div>
       </header>
 
@@ -1322,7 +1383,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
               <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-[11px] font-medium text-zinc-500">分享状态</div>
+                    <div className="text-[11px] font-medium text-zinc-500">分享</div>
                     <div className="mt-0.5">
                       {shareUrl ? "公开（持链接可见，只读）" : "私有（仅我可见）"}
                     </div>
@@ -1349,6 +1410,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
                       className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
                       disabled={!state || sharing || stoppingShare || deletingMindmap}
                       onClick={onShare}
+                      title={shareUrl ? "刷新链接" : "生成链接"}
                       type="button"
                     >
                       {sharing ? "处理中…" : shareUrl ? "刷新链接" : "生成链接"}
@@ -1366,6 +1428,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
                               setCopied(false);
                             }
                           }}
+                          title="复制链接"
                           type="button"
                         >
                           {copied ? "已复制" : "复制链接"}
@@ -1374,6 +1437,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
                           className="rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:bg-zinc-950 dark:text-red-200 dark:hover:bg-red-950/30"
                           disabled={sharing || stoppingShare}
                           onClick={onStopSharing}
+                          title="停止分享"
                           type="button"
                         >
                           {stoppingShare ? "停止中…" : "停止分享"}
