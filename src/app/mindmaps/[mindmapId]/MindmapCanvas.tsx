@@ -89,7 +89,7 @@ const MindmapNode = memo(function MindmapNode({
   if (data.isEditing) {
     return (
       <div
-        className={`rounded-md border bg-white px-3 py-2 shadow-sm transition-colors dark:bg-zinc-950 ${highlightClass} ${
+        className={`rounded-md border bg-white px-3 py-2 shadow-sm transition-all duration-300 dark:bg-zinc-950 ${highlightClass} ${
           selected ? "border-zinc-900 dark:border-zinc-100" : "border-zinc-200 dark:border-zinc-800"
         }`}
       >
@@ -143,7 +143,7 @@ const MindmapNode = memo(function MindmapNode({
 
   return (
     <div
-      className={`rounded-md border bg-white px-3 py-2 text-sm shadow-sm transition-colors dark:bg-zinc-950 ${highlightClass} ${
+      className={`rounded-md border bg-white px-3 py-2 text-sm shadow-sm transition-all duration-300 dark:bg-zinc-950 ${highlightClass} ${
         selected ? "border-zinc-900 dark:border-zinc-100" : "border-zinc-200 dark:border-zinc-800"
       }`}
       onDoubleClick={(event) => {
