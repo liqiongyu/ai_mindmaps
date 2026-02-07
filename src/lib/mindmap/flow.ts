@@ -78,11 +78,14 @@ export function mindmapStateToFlow(
     const node = state.nodesById[id];
     if (!node) throw new Error(`Node not found: ${id}`);
 
+    const manualPosition =
+      node.posX !== undefined && node.posY !== undefined ? { x: node.posX, y: node.posY } : null;
+
     return {
       id,
       type: "default",
       data: { label: node.text },
-      position: { x: pos.x - minX, y: pos.y - minY },
+      position: manualPosition ?? { x: pos.x - minX, y: pos.y - minY },
     };
   });
 

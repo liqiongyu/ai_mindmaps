@@ -49,6 +49,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState<"png" | "svg" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [positionSaveError, setPositionSaveError] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(() => new Set());
 
@@ -163,6 +164,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSharing(false);
     setExportError(null);
     setExporting(null);
+    setPositionSaveError(null);
     setInspectorOpen(false);
     setCollapsedNodeIds(new Set());
     setSaveStatus("loading");
@@ -698,6 +700,34 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     }
   }, [persistedMindmapId, router]);
 
+  const onPersistNodePosition = useCallback(
+    async (args: { nodeId: string; x: number; y: number }) => {
+      if (!persistedMindmapId) return;
+      setPositionSaveError(null);
+      try {
+        const res = await fetch(`/api/mindmaps/${persistedMindmapId}/positions`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ positions: [args] }),
+        });
+        const json = (await res.json().catch(() => null)) as
+          | { ok: true }
+          | { ok: false; message?: string }
+          | null;
+
+        if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
+          throw new Error(
+            (json && "message" in json && json.message) || `Position save failed (${res.status})`,
+          );
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Position save failed";
+        setPositionSaveError(message);
+      }
+    },
+    [persistedMindmapId],
+  );
+
   const onExport = useCallback(
     async (format: "png" | "svg") => {
       const canvas = canvasRef.current;
@@ -724,6 +754,11 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     },
     [persistedMindmapId],
   );
+
+  const dragHint = useMemo(() => {
+    if (persistedMindmapId) return "Drag: move node (position saved)";
+    return "Drag: move node (demo; not persisted)";
+  }, [persistedMindmapId]);
 
   const statusLabel = useMemo(() => {
     if (props.mode === "demo") return "Demo";
@@ -939,6 +974,11 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
                 Save failed: {saveError}
               </div>
             ) : null}
+            {positionSaveError ? (
+              <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
+                Position save failed: {positionSaveError}
+              </div>
+            ) : null}
             {exportError ? (
               <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
                 Export failed: {exportError}
@@ -946,12 +986,13 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
             ) : null}
             <div className="relative min-h-0 flex-1">
               <div className="pointer-events-none absolute top-3 right-3 z-10 rounded-md border border-zinc-200 bg-white/90 px-2 py-1 text-[11px] text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-300">
-                Drag: move node (visual only; not persisted yet)
+                {dragHint}
               </div>
               <MindmapCanvas
                 ref={canvasRef}
                 collapsedNodeIds={collapsedNodeIds}
                 editable
+                onPersistNodePosition={onPersistNodePosition}
                 onSelectNodeId={setSelectedNodeId}
                 selectedNodeId={selectedNodeId}
                 state={state}

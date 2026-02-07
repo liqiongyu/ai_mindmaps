@@ -8,6 +8,8 @@ export const MindmapNodeSchema = z.object({
   text: z.string().min(1),
   notes: z.string().nullable(),
   orderIndex: z.number().int().nonnegative(),
+  posX: z.number().finite().optional(),
+  posY: z.number().finite().optional(),
 });
 
 export const MindmapStateSchema = z
@@ -61,6 +63,8 @@ export type MindmapNodeRow = {
   text: string;
   notes: string | null;
   order_index: number;
+  pos_x?: number | null;
+  pos_y?: number | null;
 };
 
 export function mindmapStateToNodeRows(mindmapId: string, state: MindmapState): MindmapNodeRow[] {
@@ -99,16 +103,22 @@ export function mindmapStateToNodeRows(mindmapId: string, state: MindmapState): 
 
 export function nodeRowsToMindmapState(
   rootNodeId: string,
-  rows: Array<Pick<MindmapNodeRow, "id" | "parent_id" | "text" | "notes" | "order_index">>,
+  rows: Array<
+    Pick<MindmapNodeRow, "id" | "parent_id" | "text" | "notes" | "order_index" | "pos_x" | "pos_y">
+  >,
 ): MindmapState {
   const nodesById: Record<string, MindmapNode> = {};
   for (const row of rows) {
+    const posX = row.pos_x ?? undefined;
+    const posY = row.pos_y ?? undefined;
     nodesById[row.id] = {
       id: row.id,
       parentId: row.parent_id,
       text: row.text,
       notes: row.notes,
       orderIndex: row.order_index,
+      ...(posX === undefined ? {} : { posX }),
+      ...(posY === undefined ? {} : { posY }),
     };
   }
   return { rootNodeId, nodesById };

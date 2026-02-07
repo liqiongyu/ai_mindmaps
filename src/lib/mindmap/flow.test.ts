@@ -60,4 +60,68 @@ describe("mindmapStateToFlow", () => {
     expect(Math.sign(a1X! - rootX!)).toBe(aSign);
     expect(Math.sign(b1X! - rootX!)).toBe(bSign);
   });
+
+  test("uses persisted positions when present", () => {
+    const state = {
+      rootNodeId: "root",
+      nodesById: {
+        root: {
+          id: "root",
+          parentId: null,
+          text: "Root",
+          notes: null,
+          orderIndex: 0,
+          posX: 123,
+          posY: 456,
+        },
+        a: {
+          id: "a",
+          parentId: "root",
+          text: "A",
+          notes: null,
+          orderIndex: 0,
+          posX: 10,
+          posY: 20,
+        },
+      },
+    };
+
+    const graph = mindmapStateToFlow(state);
+    const posById = new Map(graph.nodes.map((n) => [n.id, n.position] as const));
+
+    expect(posById.get("root")).toEqual({ x: 123, y: 456 });
+    expect(posById.get("a")).toEqual({ x: 10, y: 20 });
+  });
+
+  test("uses persisted positions when present", () => {
+    const state = {
+      rootNodeId: "root",
+      nodesById: {
+        root: {
+          id: "root",
+          parentId: null,
+          text: "Root",
+          notes: null,
+          orderIndex: 0,
+          posX: 123,
+          posY: 456,
+        },
+        a: {
+          id: "a",
+          parentId: "root",
+          text: "A",
+          notes: null,
+          orderIndex: 0,
+          posX: 10,
+          posY: 20,
+        },
+      },
+    };
+
+    const graph = mindmapStateToFlow(state);
+    const posById = new Map(graph.nodes.map((n) => [n.id, n.position] as const));
+
+    expect(posById.get("root")).toEqual({ x: 123, y: 456 });
+    expect(posById.get("a")).toEqual({ x: 10, y: 20 });
+  });
 });

@@ -40,12 +40,14 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     onSelectNodeId,
     collapsedNodeIds,
     editable = false,
+    onPersistNodePosition,
   }: {
     state: MindmapState;
     selectedNodeId: string | null;
     onSelectNodeId: (nodeId: string | null) => void;
     collapsedNodeIds?: ReadonlySet<string>;
     editable?: boolean;
+    onPersistNodePosition?: (args: { nodeId: string; x: number; y: number }) => void;
   },
   ref: ForwardedRef<MindmapCanvasHandle>,
 ) {
@@ -172,9 +174,15 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     [onSelectNodeId, setNodes],
   );
 
-  const onNodeDragStop = useCallback(() => {
-    draggingRef.current = false;
-  }, []);
+  const onNodeDragStop = useCallback(
+    (_event: unknown, node: Node) => {
+      draggingRef.current = false;
+      if (!editable) return;
+      if (node.id === state.rootNodeId) return;
+      onPersistNodePosition?.({ nodeId: node.id, x: node.position.x, y: node.position.y });
+    },
+    [editable, onPersistNodePosition, state.rootNodeId],
+  );
 
   const onPaneClick = useCallback(() => {
     onSelectNodeId(null);
