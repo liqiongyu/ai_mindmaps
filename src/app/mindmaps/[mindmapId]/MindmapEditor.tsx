@@ -75,6 +75,25 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     ? siblingContext.index < siblingContext.siblings.length - 1
     : false;
 
+  const outdentContext = useMemo(() => {
+    if (!state) return null;
+    if (!selectedNodeId) return null;
+    const node = state.nodesById[selectedNodeId];
+    if (!node?.parentId) return null;
+
+    const parent = state.nodesById[node.parentId];
+    if (!parent?.parentId) return null;
+
+    return {
+      parentId: node.parentId,
+      grandParentId: parent.parentId,
+      parentOrderIndex: parent.orderIndex,
+    };
+  }, [selectedNodeId, state]);
+
+  const canIndent = canMoveUp;
+  const canOutdent = outdentContext !== null;
+
   const selectedLabel = useMemo(() => {
     if (!selectedNodeId) return "none";
     return selectedNode?.text ?? selectedNodeId;
@@ -360,6 +379,55 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     [apply, commit, selectedNodeId, state],
   );
 
+  const onIndent = useCallback(() => {
+    if (!state) return;
+    if (!selectedNodeId) return;
+    const selected = state.nodesById[selectedNodeId];
+    if (!selected?.parentId) return;
+
+    const siblings = Object.values(state.nodesById)
+      .filter((n) => n.parentId === selected.parentId)
+      .sort((a, b) => a.orderIndex - b.orderIndex);
+    const index = siblings.findIndex((n) => n.id === selectedNodeId);
+    if (index <= 0) return;
+
+    const newParentId = siblings[index - 1].id;
+    const result = apply(
+      [{ type: "move_node", nodeId: selectedNodeId, newParentId }],
+      selectedNodeId,
+    );
+    if (!result.ok) return globalThis.alert(result.message);
+
+    commit(result.nextState);
+    setSelectedNodeId(result.nextSelectedNodeId);
+  }, [apply, commit, selectedNodeId, state]);
+
+  const onOutdent = useCallback(() => {
+    if (!state) return;
+    if (!selectedNodeId) return;
+    const selected = state.nodesById[selectedNodeId];
+    if (!selected?.parentId) return;
+
+    const parent = state.nodesById[selected.parentId];
+    if (!parent?.parentId) return;
+
+    const result = apply(
+      [
+        {
+          type: "move_node",
+          nodeId: selectedNodeId,
+          newParentId: parent.parentId,
+          index: parent.orderIndex + 1,
+        },
+      ],
+      selectedNodeId,
+    );
+    if (!result.ok) return globalThis.alert(result.message);
+
+    commit(result.nextState);
+    setSelectedNodeId(result.nextSelectedNodeId);
+  }, [apply, commit, selectedNodeId, state]);
+
   const onOpenInspector = useCallback(() => {
     if (!selectedNodeId) return;
     if (!stateRef.current?.nodesById[selectedNodeId]) return;
@@ -576,6 +644,22 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
             type="button"
           >
             Add sibling
+          </button>
+          <button
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            disabled={!state || !canIndent}
+            onClick={onIndent}
+            type="button"
+          >
+            Indent
+          </button>
+          <button
+            className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            disabled={!state || !canOutdent}
+            onClick={onOutdent}
+            type="button"
+          >
+            Outdent
           </button>
           <button
             className="rounded-md border border-zinc-200 px-3 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:hover:bg-zinc-900"

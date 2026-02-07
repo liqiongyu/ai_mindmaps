@@ -103,11 +103,11 @@ export function applyOperations(state: MindmapState, operations: Operation[]): M
         }
 
         const oldParentId = node.parentId;
-        node.parentId = operation.newParentId;
-
         const siblings = getChildren(next.nodesById, operation.newParentId);
         const insertIndex = operation.index ?? siblings.length;
         bumpOrderIndices(next.nodesById, operation.newParentId, insertIndex);
+
+        node.parentId = operation.newParentId;
         node.orderIndex = insertIndex;
 
         if (oldParentId) {
