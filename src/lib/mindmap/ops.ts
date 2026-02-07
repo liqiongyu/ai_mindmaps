@@ -103,16 +103,46 @@ export function applyOperations(state: MindmapState, operations: Operation[]): M
         }
 
         const oldParentId = node.parentId;
-        const siblings = getChildren(next.nodesById, operation.newParentId);
-        const insertIndex = operation.index ?? siblings.length;
-        bumpOrderIndices(next.nodesById, operation.newParentId, insertIndex);
-
-        node.parentId = operation.newParentId;
-        node.orderIndex = insertIndex;
-
-        if (oldParentId) {
-          normalizeOrderIndices(next.nodesById, oldParentId);
+        if (!oldParentId) {
+          throw new Error("Cannot move node without parent");
         }
+
+        if (oldParentId === operation.newParentId && operation.index === undefined) {
+          break;
+        }
+
+        const oldChildIds = getChildren(next.nodesById, oldParentId)
+          .map((child) => child.id)
+          .filter((id) => id !== operation.nodeId);
+
+        const newParentId = operation.newParentId;
+        const newChildIds =
+          oldParentId === newParentId
+            ? oldChildIds
+            : getChildren(next.nodesById, newParentId).map((child) => child.id);
+
+        const insertIndex = clampIndex(operation.index ?? newChildIds.length, newChildIds.length);
+
+        if (oldParentId === newParentId) {
+          const ordered = [...oldChildIds];
+          ordered.splice(insertIndex, 0, operation.nodeId);
+          ordered.forEach((id, index) => {
+            next.nodesById[id].orderIndex = index;
+          });
+          node.parentId = newParentId;
+          break;
+        }
+
+        oldChildIds.forEach((id, index) => {
+          next.nodesById[id].orderIndex = index;
+        });
+
+        node.parentId = newParentId;
+        const ordered = [...newChildIds];
+        ordered.splice(insertIndex, 0, operation.nodeId);
+        ordered.forEach((id, index) => {
+          next.nodesById[id].orderIndex = index;
+        });
         break;
       }
       case "delete_node": {
@@ -183,6 +213,12 @@ function normalizeOrderIndices(nodesById: Record<string, MindmapNode>, parentId:
   children.forEach((node, index) => {
     node.orderIndex = index;
   });
+}
+
+function clampIndex(index: number, max: number) {
+  if (index < 0) return 0;
+  if (index > max) return max;
+  return index;
 }
 
 function getSubtreeIds(nodesById: Record<string, MindmapNode>, rootId: string): string[] {
