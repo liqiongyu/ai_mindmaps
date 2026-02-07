@@ -38,7 +38,7 @@ export function MindmapCanvas({
   }, [onSelectNodeId]);
 
   return (
-    <div className="h-[calc(100vh-3.5rem)] w-full">
+    <div className="h-full w-full">
       <ReactFlow
         edges={edges}
         fitView
