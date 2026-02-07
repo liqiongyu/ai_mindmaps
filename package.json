@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "supabase:check": "node scripts/check_supabase_schema.mjs",
     "format:check": "prettier --check .",
     "format:write": "prettier --write .",
     "test": "vitest run",
