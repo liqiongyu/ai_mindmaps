@@ -12,6 +12,7 @@ import {
   normalizeAiChatConstraints,
   validateAiChatOperationsAgainstConstraints,
 } from "@/lib/ai/chatConstraints";
+import { buildAiChatMindmapContext } from "@/lib/ai/chatContext";
 import { normalizeAiMindmapOperationIds } from "@/lib/ai/mindmapOps";
 import { parseFirstJsonObject } from "@/lib/ai/json";
 import { OperationSchema, applyOperations } from "@/lib/mindmap/ops";
@@ -352,23 +353,15 @@ export async function POST(request: Request) {
       : "- Global scope: you may modify any nodes in the mindmap.",
   ].join("\n");
 
-  const input = [
-    `Scope: ${scope}`,
-    selectedNodeId ? `Selected node: ${selectedNodeId}` : "",
-    "",
-    "Current mindmap state (JSON):",
-    JSON.stringify(
-      {
-        rootNodeId: state.rootNodeId,
-        nodes: Object.values(state.nodesById),
-      },
-      null,
-      2,
-    ),
-    "",
-    "User message:",
-    userMessage,
-  ]
+  let mindmapContext = "";
+  try {
+    mindmapContext = buildAiChatMindmapContext({ state, scope, selectedNodeId });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Unknown error";
+    return jsonError(500, "Failed to build AI context", { detail });
+  }
+
+  const input = [`Scope: ${scope}`, "", mindmapContext, "", "User message:", userMessage]
     .filter(Boolean)
     .join("\n");
 
