@@ -22,6 +22,7 @@ type EditorActionResult =
 type SaveStatus = "idle" | "loading" | "saving" | "saved" | "error";
 
 const MAX_HISTORY_PAST = 50;
+const NEW_NODE_DEFAULT_TITLE = "New node";
 
 export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; mindmapId: string }) {
   const persistedMindmapId = props.mode === "persisted" ? props.mindmapId : null;
@@ -46,7 +47,9 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const [exportError, setExportError] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(() => new Set());
+  const [pendingInspectorNodeId, setPendingInspectorNodeId] = useState<string | null>(null);
 
+  const inspectorOpenRef = useRef(inspectorOpen);
   const stateRef = useRef<MindmapState | null>(state);
   const canvasRef = useRef<MindmapCanvasHandle | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -113,6 +116,10 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    inspectorOpenRef.current = inspectorOpen;
+  }, [inspectorOpen]);
 
   useEffect(() => {
     if (!state) return;
@@ -291,9 +298,22 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   }, [persistedMindmapId]);
 
   useEffect(() => {
-    if (!inspectorOpen) return;
+    if (!inspectorOpenRef.current) return;
     setInspectorOpen(false);
-  }, [inspectorOpen, selectedNodeId]);
+  }, [selectedNodeId]);
+
+  useEffect(() => {
+    if (!pendingInspectorNodeId) return;
+    if (!state) return;
+    if (selectedNodeId !== pendingInspectorNodeId) return;
+    if (!state.nodesById[pendingInspectorNodeId]) {
+      setPendingInspectorNodeId(null);
+      return;
+    }
+
+    setInspectorOpen(true);
+    setPendingInspectorNodeId(null);
+  }, [pendingInspectorNodeId, selectedNodeId, state]);
 
   const commit = useCallback((nextState: MindmapState) => {
     stateRef.current = nextState;
@@ -372,9 +392,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const onAddChild = useCallback(() => {
     if (!state) return;
     const parentId = selectedNodeId ?? state.rootNodeId;
-    const text = globalThis.prompt("New node title");
-    const title = text?.trim();
-    if (!title) return;
+    const title = NEW_NODE_DEFAULT_TITLE;
 
     const nodeId = globalThis.crypto?.randomUUID?.() ?? `node_${Date.now()}`;
     const result = apply([{ type: "add_node", nodeId, parentId, text: title }], nodeId);
@@ -382,6 +400,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
 
     commit(result.nextState);
     setSelectedNodeId(result.nextSelectedNodeId);
+    setPendingInspectorNodeId(nodeId);
   }, [apply, commit, selectedNodeId, state]);
 
   const onAddSibling = useCallback(() => {
@@ -393,9 +412,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
       return globalThis.alert("Cannot add sibling for root node");
     }
 
-    const text = globalThis.prompt("New node title");
-    const title = text?.trim();
-    if (!title) return;
+    const title = NEW_NODE_DEFAULT_TITLE;
 
     const nodeId = globalThis.crypto?.randomUUID?.() ?? `node_${Date.now()}`;
     const result = apply(
@@ -414,6 +431,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
 
     commit(result.nextState);
     setSelectedNodeId(result.nextSelectedNodeId);
+    setPendingInspectorNodeId(nodeId);
   }, [apply, commit, selectedNodeId, state]);
 
   const onMoveSibling = useCallback(
