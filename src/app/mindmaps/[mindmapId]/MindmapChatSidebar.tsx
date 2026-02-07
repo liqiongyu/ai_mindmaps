@@ -5,7 +5,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Operation } from "@/lib/mindmap/ops";
 
 type ChatScope = "global" | "node";
-type ChatMessage = { role: "user" | "assistant"; content: string };
+type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
+
+function getThreadKey(scope: ChatScope, selectedNodeId: string | null): string | null {
+  if (scope === "global") return "global";
+  if (!selectedNodeId) return null;
+  return `node:${selectedNodeId}`;
+}
 
 export function MindmapChatSidebar({
   mindmapId,
@@ -19,42 +25,116 @@ export function MindmapChatSidebar({
   onApplyOperations: (operations: Operation[]) => { ok: true } | { ok: false; message: string };
 }) {
   const [scope, setScope] = useState<ChatScope>("global");
-  const [messagesByScope, setMessagesByScope] = useState<Record<ChatScope, ChatMessage[]>>({
-    global: [],
-    node: [],
-  });
+  const [messagesByThreadKey, setMessagesByThreadKey] = useState<Record<string, ChatMessage[]>>({});
+  const [attemptedLoadByThreadKey, setAttemptedLoadByThreadKey] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [loadingByThreadKey, setLoadingByThreadKey] = useState<Record<string, boolean>>({});
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setScope("global");
-    setMessagesByScope({ global: [], node: [] });
+    setMessagesByThreadKey({});
+    setAttemptedLoadByThreadKey({});
+    setLoadingByThreadKey({});
     setInput("");
     setError(null);
     setSending(false);
   }, [mindmapId]);
 
-  const messages = messagesByScope[scope];
   const nodeModeBlocked = scope === "node" && !selectedNodeId;
+  const threadKey = useMemo(() => getThreadKey(scope, selectedNodeId), [scope, selectedNodeId]);
+  const historyLoading = threadKey ? (loadingByThreadKey[threadKey] ?? false) : false;
+  const historyAttempted = threadKey ? (attemptedLoadByThreadKey[threadKey] ?? false) : false;
+  const messages = threadKey ? (messagesByThreadKey[threadKey] ?? []) : [];
+
+  useEffect(() => {
+    setError(null);
+  }, [threadKey]);
+
+  useEffect(() => {
+    if (!threadKey || historyAttempted) return;
+
+    const controller = new AbortController();
+    setLoadingByThreadKey((prev) => ({ ...prev, [threadKey]: true }));
+    setError(null);
+
+    void (async () => {
+      try {
+        const params = new URLSearchParams({
+          mindmapId,
+          scope,
+        });
+        if (scope === "node" && selectedNodeId) {
+          params.set("selectedNodeId", selectedNodeId);
+        }
+
+        const res = await fetch(`/api/ai/chat?${params.toString()}`, {
+          signal: controller.signal,
+        });
+
+        const json = (await res.json().catch(() => null)) as
+          | {
+              ok: true;
+              messages: Array<{ role: ChatMessage["role"]; content: string }>;
+            }
+          | { ok: false; message?: string }
+          | null;
+
+        if (!res.ok || !json || json.ok !== true) {
+          throw new Error(
+            (json && "message" in json && json.message) ||
+              `Failed to load chat history (${res.status})`,
+          );
+        }
+
+        const nextMessages = Array.isArray(json.messages)
+          ? json.messages.filter(
+              (m) =>
+                m &&
+                (m.role === "user" || m.role === "assistant" || m.role === "system") &&
+                typeof m.content === "string",
+            )
+          : [];
+
+        setMessagesByThreadKey((prev) => ({ ...prev, [threadKey]: nextMessages }));
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        const message = err instanceof Error ? err.message : "Failed to load chat history";
+        setError(message);
+      } finally {
+        setLoadingByThreadKey((prev) => ({ ...prev, [threadKey]: false }));
+        if (!controller.signal.aborted) {
+          setAttemptedLoadByThreadKey((prev) => ({ ...prev, [threadKey]: true }));
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  }, [historyAttempted, mindmapId, scope, selectedNodeId, threadKey]);
 
   const canSend = useMemo(() => {
     if (nodeModeBlocked) return false;
-    return input.trim().length > 0 && !sending;
-  }, [input, nodeModeBlocked, sending]);
+    return input.trim().length > 0 && !sending && historyAttempted;
+  }, [historyAttempted, input, nodeModeBlocked, sending]);
 
   const onSend = useCallback(async () => {
     const content = input.trim();
     if (!content) return;
     if (scope === "node" && !selectedNodeId) return;
+    const activeThreadKey = getThreadKey(scope, selectedNodeId);
+    if (!activeThreadKey) return;
 
     setSending(true);
     setError(null);
     setInput("");
-    setMessagesByScope((prev) => ({
+    setMessagesByThreadKey((prev) => ({
       ...prev,
-      [scope]: [...prev[scope], { role: "user", content }],
+      [activeThreadKey]: [...(prev[activeThreadKey] ?? []), { role: "user", content }],
     }));
+    setAttemptedLoadByThreadKey((prev) => ({ ...prev, [activeThreadKey]: true }));
 
     try {
       const res = await fetch("/api/ai/chat", {
@@ -79,9 +159,12 @@ export function MindmapChatSidebar({
         );
       }
 
-      setMessagesByScope((prev) => ({
+      setMessagesByThreadKey((prev) => ({
         ...prev,
-        [scope]: [...prev[scope], { role: "assistant", content: json.assistant_message }],
+        [activeThreadKey]: [
+          ...(prev[activeThreadKey] ?? []),
+          { role: "assistant", content: json.assistant_message },
+        ],
       }));
 
       const applyResult = onApplyOperations(json.operations);
@@ -144,7 +227,9 @@ export function MindmapChatSidebar({
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
         <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
-          {messages.length === 0 ? (
+          {historyLoading && messages.length === 0 ? (
+            <div className="text-sm text-zinc-600 dark:text-zinc-300">Loading chat history…</div>
+          ) : messages.length === 0 ? (
             <div className="text-sm text-zinc-600 dark:text-zinc-300">
               {scope === "global"
                 ? "Ask the AI to expand or improve this mindmap."
