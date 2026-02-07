@@ -9,6 +9,15 @@ export default function Home() {
         Supabase 持久化与 AI ops 协议。
       </p>
       <div className="flex flex-col gap-2 text-sm">
+        <Link className="underline" href="/login">
+          /login
+        </Link>
+        <Link className="underline" href="/signup">
+          /signup
+        </Link>
+        <Link className="underline" href="/mindmaps">
+          /mindmaps（需要登录）
+        </Link>
         <Link className="underline" href="/mindmaps/demo">
           /mindmaps/demo（编辑器 demo）
         </Link>
