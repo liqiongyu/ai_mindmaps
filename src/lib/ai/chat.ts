@@ -2,12 +2,25 @@ import { z } from "zod";
 
 import { OperationSchema } from "../mindmap/ops";
 
+export const AiChatConstraintsSchema = z
+  .object({
+    outputLanguage: z.enum(["zh", "en"]),
+    branchCount: z.union([z.literal(2), z.literal(4), z.literal(6), z.literal(8)]),
+    depth: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    allowMove: z.boolean(),
+    allowDelete: z.boolean(),
+  })
+  .strict();
+
+export type AiChatConstraints = z.infer<typeof AiChatConstraintsSchema>;
+
 export const AiChatRequestSchema = z
   .object({
     mindmapId: z.string().min(1),
     scope: z.enum(["global", "node"]),
     selectedNodeId: z.string().min(1).optional(),
     userMessage: z.string().min(1),
+    constraints: AiChatConstraintsSchema.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

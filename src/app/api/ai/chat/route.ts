@@ -7,10 +7,14 @@ import {
   AiChatModelOutputSchema,
   AiChatRequestSchema,
 } from "@/lib/ai/chat";
+import {
+  buildAiChatConstraintsInstructionBlock,
+  normalizeAiChatConstraints,
+  validateAiChatOperationsAgainstConstraints,
+} from "@/lib/ai/chatConstraints";
 import { normalizeAiMindmapOperationIds } from "@/lib/ai/mindmapOps";
 import { parseFirstJsonObject } from "@/lib/ai/json";
 import { OperationSchema, applyOperations } from "@/lib/mindmap/ops";
-import { hasDeleteNodeOperation } from "@/lib/mindmap/operationSummary";
 import { nodeRowsToMindmapState } from "@/lib/mindmap/storage";
 import { validateOperationsScope } from "@/lib/mindmap/scope";
 import { createAzureOpenAIClient, getAzureOpenAIConfigFromEnv } from "@/lib/llm/azureOpenAI";
@@ -264,7 +268,14 @@ export async function POST(request: Request) {
     return jsonError(400, "Invalid request body", { issues: parsedRequest.error.issues });
   }
 
-  const { mindmapId, scope, selectedNodeId, userMessage } = parsedRequest.data;
+  const {
+    mindmapId,
+    scope,
+    selectedNodeId,
+    userMessage,
+    constraints: requestedConstraints,
+  } = parsedRequest.data;
+  const constraints = normalizeAiChatConstraints(requestedConstraints);
 
   const { data: mindmap, error: mindmapError } = await supabase
     .from("mindmaps")
@@ -299,10 +310,17 @@ export async function POST(request: Request) {
   let modelName = "";
   let modelOutput: z.infer<typeof AiChatModelOutputSchema> | null = null;
 
+  const constraintsInstructionBlock = buildAiChatConstraintsInstructionBlock(constraints);
+  const outputLanguageInstruction =
+    constraints.outputLanguage === "zh"
+      ? "assistant_message MUST be in Chinese."
+      : "assistant_message MUST be in English.";
+
   const instructions = [
     "You edit a mindmap by returning JSON ops.",
     "Return ONLY a single JSON object (no markdown, no code fences).",
     "assistant_message should be concise (<= 2 sentences).",
+    outputLanguageInstruction,
     "",
     "Output schema:",
     '{ "assistant_message": string, "operations": Operation[] }',
@@ -315,9 +333,17 @@ export async function POST(request: Request) {
     '- delete_node: { type: \"delete_node\", nodeId }',
     '- reorder_children: { type: \"reorder_children\", parentId, orderedChildIds }',
     "",
+    constraintsInstructionBlock,
+    "",
     "Rules:",
     "- Do not delete or move the root node.",
-    "- Do not delete nodes (do not output delete_node).",
+    constraints.allowDelete
+      ? "- You MAY delete nodes if explicitly requested by the user (never delete the root node)."
+      : "- Do not delete nodes (do not output delete_node).",
+    constraints.allowMove
+      ? "- You MAY move or reorder nodes when it improves clarity."
+      : "- Do not move or reorder nodes (do not output move_node or reorder_children).",
+    `- When adding new nodes, aim for about ${constraints.branchCount} branches and depth up to ${constraints.depth} levels for newly added content.`,
     "- Reference existing nodes by their id.",
     '- For add_node, set nodeId to a UNIQUE temporary id (e.g. "n1", "n2"). The system will replace it with a UUID.',
     "- If uncertain, set operations to [] and ask a clarifying question in assistant_message.",
@@ -438,8 +464,12 @@ export async function POST(request: Request) {
     return jsonError(500, "AI provider error", { detail: "Model output unavailable" });
   }
 
-  if (hasDeleteNodeOperation(modelOutput.operations)) {
-    return jsonError(400, "为安全起见，AI 默认不会删除节点。如需删除，请明确说明要删除哪些节点。");
+  const constraintCheck = validateAiChatOperationsAgainstConstraints({
+    constraints,
+    operations: modelOutput.operations,
+  });
+  if (!constraintCheck.ok) {
+    return jsonError(400, constraintCheck.message);
   }
 
   const scopeCheck = validateOperationsScope({
