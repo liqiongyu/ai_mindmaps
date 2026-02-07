@@ -32,6 +32,26 @@ export const MindmapStateSchema = z
         path: ["nodesById", value.rootNodeId, "parentId"],
       });
     }
+
+    for (const [nodeId, node] of Object.entries(value.nodesById)) {
+      if (nodeId === value.rootNodeId) continue;
+      if (node.parentId === null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Only the root node may have parentId = null",
+          path: ["nodesById", nodeId, "parentId"],
+        });
+        continue;
+      }
+
+      if (!value.nodesById[node.parentId]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "parentId must exist in nodesById",
+          path: ["nodesById", nodeId, "parentId"],
+        });
+      }
+    }
   });
 
 export type MindmapNodeRow = {
@@ -44,14 +64,37 @@ export type MindmapNodeRow = {
 };
 
 export function mindmapStateToNodeRows(mindmapId: string, state: MindmapState): MindmapNodeRow[] {
-  return Object.values(state.nodesById).map((node) => ({
-    id: node.id,
-    mindmap_id: mindmapId,
-    parent_id: node.parentId,
-    text: node.text,
-    notes: node.notes,
-    order_index: node.orderIndex,
-  }));
+  const childrenByParentId: Record<string, MindmapNode[]> = {};
+  for (const node of Object.values(state.nodesById)) {
+    if (!node.parentId) continue;
+    (childrenByParentId[node.parentId] ||= []).push(node);
+  }
+
+  for (const children of Object.values(childrenByParentId)) {
+    children.sort((a, b) => a.orderIndex - b.orderIndex);
+  }
+
+  const result: MindmapNodeRow[] = [];
+
+  const visit = (nodeId: string) => {
+    const node = state.nodesById[nodeId];
+    if (!node) return;
+    result.push({
+      id: node.id,
+      mindmap_id: mindmapId,
+      parent_id: node.parentId,
+      text: node.text,
+      notes: node.notes,
+      order_index: node.orderIndex,
+    });
+
+    for (const child of childrenByParentId[nodeId] ?? []) {
+      visit(child.id);
+    }
+  };
+
+  visit(state.rootNodeId);
+  return result;
 }
 
 export function nodeRowsToMindmapState(

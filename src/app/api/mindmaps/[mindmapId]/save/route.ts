@@ -8,6 +8,11 @@ function jsonError(status: number, message: string, extra?: Record<string, unkno
   return NextResponse.json({ ok: false, message, ...extra }, { status });
 }
 
+function isMissingAtomicSaveRpc(error: { code?: string; message: string }): boolean {
+  if (error.code === "PGRST202") return true;
+  return /could not find the function/i.test(error.message);
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ mindmapId: string }> },
@@ -56,6 +61,31 @@ export async function POST(
     mindmap.title ||
     "Untitled";
 
+  const rows = mindmapStateToNodeRows(mindmapId, parsed.data.state);
+  const rpcNodes = rows.map((r) => ({
+    id: r.id,
+    parent_id: r.parent_id,
+    text: r.text,
+    notes: r.notes,
+    order_index: r.order_index,
+  }));
+
+  const { error: rpcError } = await supabase.rpc("mma_replace_mindmap_nodes", {
+    p_mindmap_id: mindmapId,
+    p_root_node_id: mindmap.root_node_id,
+    p_title: inferredTitle,
+    p_nodes: rpcNodes,
+  });
+
+  if (!rpcError) {
+    return NextResponse.json({ ok: true });
+  }
+
+  if (!isMissingAtomicSaveRpc(rpcError)) {
+    return jsonError(500, "Failed to save mindmap nodes", { detail: rpcError.message });
+  }
+
+  // Fallback path (RPC not deployed): do a best-effort non-destructive save.
   const { error: updateError } = await supabase
     .from("mindmaps")
     .update({ title: inferredTitle })
@@ -66,20 +96,24 @@ export async function POST(
     return jsonError(500, "Failed to update mindmap", { detail: updateError.message });
   }
 
-  const { error: deleteError } = await supabase
-    .from("mindmap_nodes")
-    .delete()
-    .eq("mindmap_id", mindmapId);
+  const { error: upsertError } = await supabase.from("mindmap_nodes").upsert(rows, {
+    onConflict: "id",
+  });
 
-  if (deleteError) {
-    return jsonError(500, "Failed to save mindmap nodes", { detail: deleteError.message });
+  if (upsertError) {
+    return jsonError(500, "Failed to save mindmap nodes", { detail: upsertError.message });
   }
 
-  const rows = mindmapStateToNodeRows(mindmapId, parsed.data.state);
-  const { error: insertError } = await supabase.from("mindmap_nodes").insert(rows);
+  const ids = rows.map((r) => r.id);
+  const inList = `(${ids.map((id) => `"${id}"`).join(",")})`;
+  const { error: cleanupError } = await supabase
+    .from("mindmap_nodes")
+    .delete()
+    .eq("mindmap_id", mindmapId)
+    .not("id", "in", inList);
 
-  if (insertError) {
-    return jsonError(500, "Failed to save mindmap nodes", { detail: insertError.message });
+  if (cleanupError) {
+    return jsonError(500, "Failed to save mindmap nodes", { detail: cleanupError.message });
   }
 
   return NextResponse.json({ ok: true });

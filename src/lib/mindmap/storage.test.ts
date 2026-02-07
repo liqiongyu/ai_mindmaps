@@ -18,6 +18,21 @@ describe("mindmap storage", () => {
     expect(restored).toEqual(sampleMindmapState);
   });
 
+  test("mindmapStateToNodeRows emits parent rows before child rows", () => {
+    const rows = mindmapStateToNodeRows("mindmap_1", sampleMindmapState);
+    const indexById = new Map(rows.map((row, index) => [row.id, index]));
+
+    for (const row of rows) {
+      if (!row.parent_id) continue;
+      const parentIndex = indexById.get(row.parent_id);
+      const childIndex = indexById.get(row.id);
+      if (parentIndex === undefined || childIndex === undefined) {
+        throw new Error("Missing index for parent or child id");
+      }
+      expect(parentIndex).toBeLessThan(childIndex);
+    }
+  });
+
   test("MindmapStateSchema rejects missing root node", () => {
     const result = MindmapStateSchema.safeParse({
       rootNodeId: "missing",
@@ -35,6 +50,28 @@ describe("mindmap storage", () => {
     };
 
     const result = MindmapStateSchema.safeParse(state);
+    expect(result.success).toBe(false);
+  });
+
+  test("MindmapStateSchema rejects non-root node with null parentId", () => {
+    const result = MindmapStateSchema.safeParse({
+      rootNodeId: "root",
+      nodesById: {
+        root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
+        other: { id: "other", parentId: null, text: "Other", notes: null, orderIndex: 0 },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("MindmapStateSchema rejects node with missing parentId reference", () => {
+    const result = MindmapStateSchema.safeParse({
+      rootNodeId: "root",
+      nodesById: {
+        root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
+        child: { id: "child", parentId: "missing", text: "Child", notes: null, orderIndex: 0 },
+      },
+    });
     expect(result.success).toBe(false);
   });
 });
