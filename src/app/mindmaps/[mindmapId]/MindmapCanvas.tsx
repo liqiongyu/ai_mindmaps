@@ -41,8 +41,6 @@ type MindmapCanvasNodeData = {
   onRequestEditNodeId?: (nodeId: string) => void;
   onCommitNodeTitle?: (args: { nodeId: string; title: string }) => { ok: true } | { ok: false };
   onCancelEditNodeId?: (nodeId: string) => void;
-  onAddChildForNode?: (nodeId: string) => void;
-  onAddSiblingForNode?: (nodeId: string) => void;
 };
 
 type MindmapCanvasNode = Node<MindmapCanvasNodeData, "mindmapNode">;
@@ -64,24 +62,14 @@ const MindmapNode = memo(function MindmapNode({
     return () => cancelAnimationFrame(handle);
   }, [data.isEditing]);
 
-  const commit = useCallback(
-    (action?: "add_child" | "add_sibling") => {
-      const title = (inputRef.current?.value ?? data.label).trim();
-      if (!title) {
-        data.onCancelEditNodeId?.(id);
-        return;
-      }
+  const commit = useCallback((): { ok: true } | { ok: false; reason: "empty" | "rejected" } => {
+    const title = (inputRef.current?.value ?? data.label).trim();
+    if (!title) return { ok: false, reason: "empty" };
 
-      data.onCommitNodeTitle?.({ nodeId: id, title });
-      if (action === "add_child") {
-        data.onAddChildForNode?.(id);
-      }
-      if (action === "add_sibling") {
-        data.onAddSiblingForNode?.(id);
-      }
-    },
-    [data, id],
-  );
+    const result = data.onCommitNodeTitle?.({ nodeId: id, title });
+    if (result && !result.ok) return { ok: false, reason: "rejected" };
+    return { ok: true };
+  }, [data, id]);
 
   if (data.isEditing) {
     return (
@@ -98,12 +86,19 @@ const MindmapNode = memo(function MindmapNode({
               skipNextBlurRef.current = false;
               return;
             }
-            commit();
+            const result = commit();
+            if (!result.ok) {
+              if (result.reason === "empty") {
+                globalThis.alert("标题不能为空");
+              }
+              data.onCancelEditNodeId?.(id);
+            }
           }}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
               event.stopPropagation();
+              skipNextBlurRef.current = true;
               data.onCancelEditNodeId?.(id);
               return;
             }
@@ -112,15 +107,17 @@ const MindmapNode = memo(function MindmapNode({
               event.preventDefault();
               event.stopPropagation();
               skipNextBlurRef.current = true;
-              commit("add_child");
+              const result = commit();
+              if (!result.ok && result.reason === "empty") {
+                globalThis.alert("标题不能为空");
+              }
               return;
             }
 
             if (event.key === "Tab") {
               event.preventDefault();
               event.stopPropagation();
-              skipNextBlurRef.current = true;
-              commit("add_sibling");
+              return;
             }
           }}
           ref={inputRef}
@@ -158,8 +155,6 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     onRequestEditNodeId,
     onCommitNodeTitle,
     onCancelEditNodeId,
-    onAddChildForNode,
-    onAddSiblingForNode,
   }: {
     state: MindmapState;
     selectedNodeId: string | null;
@@ -171,8 +166,6 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     onRequestEditNodeId?: (nodeId: string) => void;
     onCommitNodeTitle?: (args: { nodeId: string; title: string }) => { ok: true } | { ok: false };
     onCancelEditNodeId?: (nodeId: string) => void;
-    onAddChildForNode?: (nodeId: string) => void;
-    onAddSiblingForNode?: (nodeId: string) => void;
   },
   ref: ForwardedRef<MindmapCanvasHandle>,
 ) {
@@ -193,8 +186,6 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
           onRequestEditNodeId,
           onCommitNodeTitle,
           onCancelEditNodeId,
-          onAddChildForNode,
-          onAddSiblingForNode,
         },
         selected: node.id === selectedNodeId,
       };
@@ -204,8 +195,6 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     collapsedNodeIds,
     editable,
     editingNodeId,
-    onAddChildForNode,
-    onAddSiblingForNode,
     onCancelEditNodeId,
     onCommitNodeTitle,
     onRequestEditNodeId,

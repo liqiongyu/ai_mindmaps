@@ -178,6 +178,14 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
   useEffect(() => {
     if (!state) return;
+    setEditingNodeId((currentEditing) => {
+      if (!currentEditing) return currentEditing;
+      return state.nodesById[currentEditing] ? currentEditing : null;
+    });
+  }, [state]);
+
+  useEffect(() => {
+    if (!state) return;
     setCollapsedNodeIds((current) => {
       if (current.size === 0) return current;
       let changed = false;
@@ -1242,8 +1250,6 @@ export function MindmapEditor(props: MindmapEditorProps) {
                 collapsedNodeIds={collapsedNodeIds}
                 editable
                 editingNodeId={editingNodeId}
-                onAddChildForNode={addChildForNode}
-                onAddSiblingForNode={addSiblingForNode}
                 onCancelEditNodeId={onCancelEditNodeId}
                 onCommitNodeTitle={onCommitNodeTitle}
                 onPersistNodePosition={onPersistNodePosition}
