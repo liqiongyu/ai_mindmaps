@@ -43,6 +43,8 @@ export type MindmapNode = {
   text: string;
   notes: string | null;
   orderIndex: number;
+  posX?: number;
+  posY?: number;
 };
 
 export type MindmapState = {

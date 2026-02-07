@@ -27,7 +27,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
 
   const { data: nodes, error: nodesError } = await supabase
     .from("mindmap_nodes")
-    .select("id,parent_id,text,notes,order_index")
+    .select("id,parent_id,text,notes,order_index,pos_x,pos_y")
     .eq("mindmap_id", mindmap.id);
 
   if (nodesError) {

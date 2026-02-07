@@ -74,4 +74,21 @@ describe("mindmap storage", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  test("nodeRowsToMindmapState maps persisted positions", () => {
+    const restored = nodeRowsToMindmapState("root", [
+      {
+        id: "root",
+        parent_id: null,
+        text: "Root",
+        notes: null,
+        order_index: 0,
+        pos_x: 12.5,
+        pos_y: 34.25,
+      },
+    ]);
+
+    expect(restored.nodesById.root.posX).toBe(12.5);
+    expect(restored.nodesById.root.posY).toBe(34.25);
+  });
 });
