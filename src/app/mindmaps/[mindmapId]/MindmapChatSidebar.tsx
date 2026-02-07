@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import type { AiChatConstraints } from "@/lib/ai/chat";
+import {
+  DEFAULT_AI_CHAT_CONSTRAINTS,
+  formatAiChatConstraintsSummary,
+} from "@/lib/ai/chatConstraints";
 import type { Operation } from "@/lib/mindmap/ops";
 import { summarizeOperations } from "@/lib/mindmap/operationSummary";
 
@@ -10,7 +15,17 @@ type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   operations?: Operation[] | null;
+  constraints?: AiChatConstraints;
 };
+
+const PROMPT_CHIPS: Array<{ label: string; template: string }> = [
+  { label: "扩展分支", template: "扩展分支：围绕当前主题补充更多分支。" },
+  { label: "补全细节", template: "补全细节：为每个分支补充细节与要点。" },
+  { label: "重组结构", template: "重组结构：调整层级与分组，使结构更清晰。" },
+  { label: "提炼为行动项", template: "提炼为行动项：把内容整理成可执行的行动项清单。" },
+  { label: "生成示例", template: "生成示例：为关键节点补充示例/案例。" },
+  { label: "找出风险", template: "找出风险：补充风险点与对应缓解措施。" },
+];
 
 function getRoleLabel(role: ChatMessage["role"]): string {
   switch (role) {
@@ -48,6 +63,7 @@ export function MindmapChatSidebar({
   );
   const [loadingByThreadKey, setLoadingByThreadKey] = useState<Record<string, boolean>>({});
   const [input, setInput] = useState("");
+  const [constraints, setConstraints] = useState<AiChatConstraints>(DEFAULT_AI_CHAT_CONSTRAINTS);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +73,7 @@ export function MindmapChatSidebar({
     setAttemptedLoadByThreadKey({});
     setLoadingByThreadKey({});
     setInput("");
+    setConstraints(DEFAULT_AI_CHAT_CONSTRAINTS);
     setError(null);
     setSending(false);
   }, [mindmapId]);
@@ -147,6 +164,14 @@ export function MindmapChatSidebar({
     return input.trim().length > 0 && !sending && historyAttempted;
   }, [historyAttempted, input, nodeModeBlocked, sending]);
 
+  const onApplyChip = useCallback((template: string) => {
+    setInput((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) return template;
+      return `${trimmed}\n${template}`;
+    });
+  }, []);
+
   const onSend = useCallback(async () => {
     const content = input.trim();
     if (!content) return;
@@ -154,6 +179,7 @@ export function MindmapChatSidebar({
     const activeThreadKey = getThreadKey(scope, selectedNodeId);
     if (!activeThreadKey) return;
 
+    const constraintsSnapshot = { ...constraints };
     setSending(true);
     setError(null);
     setInput("");
@@ -172,6 +198,7 @@ export function MindmapChatSidebar({
           scope,
           selectedNodeId: scope === "node" ? selectedNodeId : undefined,
           userMessage: content,
+          constraints: constraintsSnapshot,
         }),
       });
 
@@ -190,7 +217,12 @@ export function MindmapChatSidebar({
         ...prev,
         [activeThreadKey]: [
           ...(prev[activeThreadKey] ?? []),
-          { role: "assistant", content: json.assistant_message, operations: json.operations },
+          {
+            role: "assistant",
+            content: json.assistant_message,
+            operations: json.operations,
+            constraints: constraintsSnapshot,
+          },
         ],
       }));
 
@@ -204,7 +236,7 @@ export function MindmapChatSidebar({
     } finally {
       setSending(false);
     }
-  }, [input, mindmapId, onApplyOperations, scope, selectedNodeId]);
+  }, [constraints, input, mindmapId, onApplyOperations, scope, selectedNodeId]);
 
   return (
     <aside className="flex w-96 shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
@@ -269,6 +301,11 @@ export function MindmapChatSidebar({
                 <div className="text-sm whitespace-pre-wrap text-zinc-900 dark:text-zinc-100">
                   {m.content}
                 </div>
+                {m.role === "assistant" && m.constraints ? (
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {formatAiChatConstraintsSummary(m.constraints)}
+                  </div>
+                ) : null}
                 {m.role === "assistant" && m.operations && m.operations.length > 0
                   ? (() => {
                       const summary = summarizeOperations(m.operations);
@@ -296,6 +333,137 @@ export function MindmapChatSidebar({
         ) : null}
 
         <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2">
+            {PROMPT_CHIPS.map((chip) => (
+              <button
+                className="rounded-full border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                disabled={sending || nodeModeBlocked}
+                key={chip.label}
+                onClick={() => onApplyChip(chip.template)}
+                type="button"
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+
+          <details className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs dark:border-zinc-800 dark:bg-zinc-950/30">
+            <summary className="cursor-pointer font-medium text-zinc-700 select-none dark:text-zinc-200">
+              高级设置
+            </summary>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                  输出语言
+                </div>
+                <div className="inline-flex overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800">
+                  <button
+                    className={`px-2 py-1 text-[11px] ${
+                      constraints.outputLanguage === "zh"
+                        ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                        : "bg-transparent text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                    }`}
+                    onClick={() =>
+                      setConstraints((prev) => ({
+                        ...prev,
+                        outputLanguage: "zh",
+                      }))
+                    }
+                    type="button"
+                  >
+                    中文
+                  </button>
+                  <button
+                    className={`px-2 py-1 text-[11px] ${
+                      constraints.outputLanguage === "en"
+                        ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                        : "bg-transparent text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                    }`}
+                    onClick={() =>
+                      setConstraints((prev) => ({
+                        ...prev,
+                        outputLanguage: "en",
+                      }))
+                    }
+                    type="button"
+                  >
+                    英文
+                  </button>
+                </div>
+              </div>
+
+              <label className="flex flex-col gap-1">
+                <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                  分支数
+                </div>
+                <select
+                  className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
+                  onChange={(event) =>
+                    setConstraints((prev) => ({
+                      ...prev,
+                      branchCount: Number(event.target.value) as AiChatConstraints["branchCount"],
+                    }))
+                  }
+                  value={constraints.branchCount}
+                >
+                  <option value={2}>2</option>
+                  <option value={4}>4</option>
+                  <option value={6}>6</option>
+                  <option value={8}>8</option>
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-300">深度</div>
+                <select
+                  className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
+                  onChange={(event) =>
+                    setConstraints((prev) => ({
+                      ...prev,
+                      depth: Number(event.target.value) as AiChatConstraints["depth"],
+                    }))
+                  }
+                  value={constraints.depth}
+                >
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                </select>
+              </label>
+
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-[11px] text-zinc-700 dark:text-zinc-200">
+                  <input
+                    checked={constraints.allowMove}
+                    className="h-4 w-4"
+                    onChange={(event) =>
+                      setConstraints((prev) => ({
+                        ...prev,
+                        allowMove: event.target.checked,
+                      }))
+                    }
+                    type="checkbox"
+                  />
+                  允许移动
+                </label>
+                <label className="flex items-center gap-2 text-[11px] text-zinc-700 dark:text-zinc-200">
+                  <input
+                    checked={constraints.allowDelete}
+                    className="h-4 w-4"
+                    onChange={(event) =>
+                      setConstraints((prev) => ({
+                        ...prev,
+                        allowDelete: event.target.checked,
+                      }))
+                    }
+                    type="checkbox"
+                  />
+                  允许删除
+                </label>
+              </div>
+            </div>
+          </details>
+
           <textarea
             className="h-24 resize-none rounded-md border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-300 disabled:opacity-50 dark:border-zinc-800 dark:focus:ring-zinc-700"
             disabled={sending || nodeModeBlocked}

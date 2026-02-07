@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import { AiChatHistoryRequestSchema, AiChatPersistedMessageSchema } from "./chat";
+import {
+  AiChatHistoryRequestSchema,
+  AiChatPersistedMessageSchema,
+  AiChatRequestSchema,
+} from "./chat";
 
 describe("ai/chat schemas", () => {
   test("AiChatHistoryRequestSchema requires selectedNodeId for node scope", () => {
@@ -15,6 +19,54 @@ describe("ai/chat schemas", () => {
         selectedNodeId: "n1",
       }).success,
     ).toBe(true);
+  });
+
+  test("AiChatRequestSchema accepts constraints", () => {
+    expect(
+      AiChatRequestSchema.safeParse({
+        mindmapId: "m1",
+        scope: "global",
+        userMessage: "Hello",
+        constraints: {
+          outputLanguage: "zh",
+          branchCount: 4,
+          depth: 2,
+          allowMove: true,
+          allowDelete: false,
+        },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      AiChatRequestSchema.safeParse({
+        mindmapId: "m1",
+        scope: "node",
+        selectedNodeId: "n1",
+        userMessage: "Expand",
+        constraints: {
+          outputLanguage: "en",
+          branchCount: 8,
+          depth: 3,
+          allowMove: false,
+          allowDelete: true,
+        },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      AiChatRequestSchema.safeParse({
+        mindmapId: "m1",
+        scope: "global",
+        userMessage: "Hello",
+        constraints: {
+          outputLanguage: "zh",
+          branchCount: 3,
+          depth: 2,
+          allowMove: true,
+          allowDelete: false,
+        },
+      }).success,
+    ).toBe(false);
   });
 
   test("AiChatPersistedMessageSchema enforces operations presence by role", () => {
