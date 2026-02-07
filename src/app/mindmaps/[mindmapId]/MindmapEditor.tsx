@@ -403,6 +403,8 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
             <MindmapChatSidebar
               mindmapId={persistedMindmapId}
               onApplyOperations={applyAIOperations}
+              selectedNodeId={selectedNodeId}
+              selectedNodeLabel={selectedLabel}
             />
           ) : null}
         </div>
