@@ -1269,7 +1269,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
             ) : null}
             {shareError ? (
               <div className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200">
-                Share failed: {shareError}
+                分享失败：{shareError}
               </div>
             ) : null}
             {persistedMindmapId ? (
@@ -1307,30 +1307,33 @@ export function MindmapEditor(props: MindmapEditorProps) {
                     >
                       {sharing ? "处理中…" : shareUrl ? "刷新链接" : "生成链接"}
                     </button>
-                    <button
-                      className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
-                      disabled={!shareUrl || sharing || stoppingShare}
-                      onClick={async () => {
-                        if (!shareUrl) return;
-                        try {
-                          await navigator.clipboard.writeText(shareUrl);
-                          setCopied(true);
-                        } catch {
-                          setCopied(false);
-                        }
-                      }}
-                      type="button"
-                    >
-                      {copied ? "已复制" : "复制链接"}
-                    </button>
-                    <button
-                      className="rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:bg-zinc-950 dark:text-red-200 dark:hover:bg-red-950/30"
-                      disabled={!shareUrl || sharing || stoppingShare}
-                      onClick={onStopSharing}
-                      type="button"
-                    >
-                      {stoppingShare ? "停止中…" : "停止分享"}
-                    </button>
+                    {shareUrl ? (
+                      <>
+                        <button
+                          className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+                          disabled={sharing || stoppingShare}
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(shareUrl);
+                              setCopied(true);
+                            } catch {
+                              setCopied(false);
+                            }
+                          }}
+                          type="button"
+                        >
+                          {copied ? "已复制" : "复制链接"}
+                        </button>
+                        <button
+                          className="rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:bg-zinc-950 dark:text-red-200 dark:hover:bg-red-950/30"
+                          disabled={sharing || stoppingShare}
+                          onClick={onStopSharing}
+                          type="button"
+                        >
+                          {stoppingShare ? "停止中…" : "停止分享"}
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </div>
