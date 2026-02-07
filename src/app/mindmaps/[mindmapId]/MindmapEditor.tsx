@@ -523,39 +523,6 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setSelectedNodeId(result.nextSelectedNodeId);
   }, [apply, commit, selectedNodeId, state]);
 
-  const onMoveNode = useCallback(
-    (args: { nodeId: string; newParentId: string; index?: number }): boolean => {
-      if (!state) return false;
-
-      const operation: Operation =
-        args.index === undefined
-          ? { type: "move_node", nodeId: args.nodeId, newParentId: args.newParentId }
-          : {
-              type: "move_node",
-              nodeId: args.nodeId,
-              newParentId: args.newParentId,
-              index: args.index,
-            };
-
-      const result = apply([operation], args.nodeId);
-      if (!result.ok) {
-        globalThis.alert(result.message);
-        return false;
-      }
-
-      commit(result.nextState);
-      setSelectedNodeId(result.nextSelectedNodeId);
-      setCollapsedNodeIds((current) => {
-        if (!current.has(args.newParentId)) return current;
-        const next = new Set(current);
-        next.delete(args.newParentId);
-        return next;
-      });
-      return true;
-    },
-    [apply, commit, state],
-  );
-
   const onToggleCollapse = useCallback(() => {
     if (!state) return;
     if (!selectedNodeId) return;
@@ -979,12 +946,12 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
             ) : null}
             <div className="relative min-h-0 flex-1">
               <div className="pointer-events-none absolute top-3 right-3 z-10 rounded-md border border-zinc-200 bg-white/90 px-2 py-1 text-[11px] text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-300">
-                Drag: reorder siblings · Drop on node: move under it
+                Drag: move node (visual only; not persisted yet)
               </div>
               <MindmapCanvas
                 ref={canvasRef}
                 collapsedNodeIds={collapsedNodeIds}
-                onMoveNode={onMoveNode}
+                editable
                 onSelectNodeId={setSelectedNodeId}
                 selectedNodeId={selectedNodeId}
                 state={state}
