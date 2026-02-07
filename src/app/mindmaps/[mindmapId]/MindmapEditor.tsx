@@ -1313,7 +1313,11 @@ export function MindmapEditor(props: MindmapEditorProps) {
             </div>
 
             <details className="relative" ref={dangerMenuRef}>
-              <summary className={TOOLBAR_MENU_SUMMARY_CLASS_NAME} title="更多">
+              <summary
+                aria-label="更多操作"
+                className={TOOLBAR_MENU_SUMMARY_CLASS_NAME}
+                title="更多"
+              >
                 ⋯
               </summary>
               <div className={TOOLBAR_MENU_PANEL_CLASS_NAME}>
