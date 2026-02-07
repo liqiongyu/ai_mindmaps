@@ -47,7 +47,6 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
   const [exportError, setExportError] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(() => new Set());
-  const [pendingInspectorNodeId, setPendingInspectorNodeId] = useState<string | null>(null);
 
   const inspectorOpenRef = useRef(inspectorOpen);
   const stateRef = useRef<MindmapState | null>(state);
@@ -302,19 +301,6 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     setInspectorOpen(false);
   }, [selectedNodeId]);
 
-  useEffect(() => {
-    if (!pendingInspectorNodeId) return;
-    if (!state) return;
-    if (selectedNodeId !== pendingInspectorNodeId) return;
-    if (!state.nodesById[pendingInspectorNodeId]) {
-      setPendingInspectorNodeId(null);
-      return;
-    }
-
-    setInspectorOpen(true);
-    setPendingInspectorNodeId(null);
-  }, [pendingInspectorNodeId, selectedNodeId, state]);
-
   const commit = useCallback((nextState: MindmapState) => {
     stateRef.current = nextState;
     setHistory((current) => {
@@ -347,8 +333,24 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     const onKeyDown = (event: KeyboardEvent) => {
       const { target } = event;
       if (target instanceof HTMLElement) {
-        const tag = target.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+        if (target.closest("input, textarea, select, button, a") || target.isContentEditable) {
+          return;
+        }
+      }
+
+      if (
+        event.key === "Enter" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
+        const currentSelectedNodeId = selectedNodeId;
+        if (!currentSelectedNodeId) return;
+        if (!stateRef.current?.nodesById[currentSelectedNodeId]) return;
+        event.preventDefault();
+        setInspectorOpen(true);
+        return;
       }
 
       const key = event.key.toLowerCase();
@@ -371,7 +373,7 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [onRedo, onUndo]);
+  }, [onRedo, onUndo, selectedNodeId]);
 
   const apply = useCallback(
     (ops: Operation[], nextSelectedNodeId: string | null): EditorActionResult => {
@@ -400,7 +402,6 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
 
     commit(result.nextState);
     setSelectedNodeId(result.nextSelectedNodeId);
-    setPendingInspectorNodeId(nodeId);
   }, [apply, commit, selectedNodeId, state]);
 
   const onAddSibling = useCallback(() => {
@@ -431,7 +432,6 @@ export function MindmapEditor(props: { mode: "demo" } | { mode: "persisted"; min
 
     commit(result.nextState);
     setSelectedNodeId(result.nextSelectedNodeId);
-    setPendingInspectorNodeId(nodeId);
   }, [apply, commit, selectedNodeId, state]);
 
   const onMoveSibling = useCallback(
