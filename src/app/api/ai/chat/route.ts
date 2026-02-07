@@ -7,6 +7,7 @@ import {
   AiChatModelOutputSchema,
   AiChatRequestSchema,
 } from "@/lib/ai/chat";
+import { normalizeAiMindmapOperationIds } from "@/lib/ai/mindmapOps";
 import { parseFirstJsonObject } from "@/lib/ai/json";
 import { OperationSchema, applyOperations } from "@/lib/mindmap/ops";
 import { nodeRowsToMindmapState } from "@/lib/mindmap/storage";
@@ -294,101 +295,159 @@ export async function POST(request: Request) {
 
   const state = nodeRowsToMindmapState(mindmap.root_node_id, nodesParsed.data);
 
-  let modelOutputText = "";
   let modelName = "";
+  let modelOutput: z.infer<typeof AiChatModelOutputSchema> | null = null;
+
+  const instructions = [
+    "You edit a mindmap by returning JSON ops.",
+    "Return ONLY a single JSON object (no markdown, no code fences).",
+    "assistant_message should be concise (<= 2 sentences).",
+    "",
+    "Output schema:",
+    '{ "assistant_message": string, "operations": Operation[] }',
+    "",
+    "Operation types:",
+    '- add_node: { type: \"add_node\", nodeId, parentId, text, index? }',
+    '- rename_node: { type: \"rename_node\", nodeId, text }',
+    '- update_notes: { type: \"update_notes\", nodeId, notes }',
+    '- move_node: { type: \"move_node\", nodeId, newParentId, index? }',
+    '- delete_node: { type: \"delete_node\", nodeId }',
+    '- reorder_children: { type: \"reorder_children\", parentId, orderedChildIds }',
+    "",
+    "Rules:",
+    "- Do not delete or move the root node.",
+    "- Reference existing nodes by their id.",
+    '- For add_node, set nodeId to a UNIQUE temporary id (e.g. "n1", "n2"). The system will replace it with a UUID.',
+    "- If uncertain, set operations to [] and ask a clarifying question in assistant_message.",
+    scope === "node"
+      ? "- Node scope: only modify the selected node subtree; new nodes must be added under allowed parents."
+      : "- Global scope: you may modify any nodes in the mindmap.",
+  ].join("\n");
+
+  const input = [
+    `Scope: ${scope}`,
+    selectedNodeId ? `Selected node: ${selectedNodeId}` : "",
+    "",
+    "Current mindmap state (JSON):",
+    JSON.stringify(
+      {
+        rootNodeId: state.rootNodeId,
+        nodes: Object.values(state.nodesById),
+      },
+      null,
+      2,
+    ),
+    "",
+    "User message:",
+    userMessage,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   try {
     const config = getAzureOpenAIConfigFromEnv(process.env);
     modelName = config.model;
     const client = createAzureOpenAIClient(config);
 
-    const instructions = [
-      "You edit a mindmap by returning JSON ops.",
-      "Return ONLY a single JSON object (no markdown, no code fences).",
-      "",
-      "Output schema:",
-      '{ "assistant_message": string, "operations": Operation[] }',
-      "",
-      "Operation types:",
-      '- add_node: { type: "add_node", nodeId, parentId, text, index? }',
-      '- rename_node: { type: "rename_node", nodeId, text }',
-      '- update_notes: { type: "update_notes", nodeId, notes }',
-      '- move_node: { type: "move_node", nodeId, newParentId, index? }',
-      '- delete_node: { type: "delete_node", nodeId }',
-      '- reorder_children: { type: "reorder_children", parentId, orderedChildIds }',
-      "",
-      "Rules:",
-      "- Do not delete or move the root node.",
-      "- Reference existing nodes by their id.",
-      "- If uncertain, set operations to [] and ask a clarifying question in assistant_message.",
-      scope === "node"
-        ? "- Node scope: only modify the selected node subtree; new nodes must be added under allowed parents."
-        : "- Global scope: you may modify any nodes in the mindmap.",
-    ].join("\n");
+    const attempts: Array<{ maxOutputTokens: number; extraInstructions?: string }> = [
+      { maxOutputTokens: 4096 },
+      {
+        maxOutputTokens: 8192,
+        extraInstructions:
+          "Your previous output was invalid, truncated, or empty. Return the complete JSON object only.",
+      },
+    ];
 
-    const input = [
-      `Scope: ${scope}`,
-      selectedNodeId ? `Selected node: ${selectedNodeId}` : "",
-      "",
-      "Current mindmap state (JSON):",
-      JSON.stringify(
-        {
-          rootNodeId: state.rootNodeId,
-          nodes: Object.values(state.nodesById),
-        },
-        null,
-        2,
-      ),
-      "",
-      "User message:",
-      userMessage,
-    ]
-      .filter(Boolean)
-      .join("\n");
+    let lastError: unknown = null;
+    for (const attempt of attempts) {
+      try {
+        const response = await client.responses.create({
+          model: config.model,
+          reasoning: { effort: "minimal" },
+          instructions: attempt.extraInstructions
+            ? `${instructions}\n\n${attempt.extraInstructions}`
+            : instructions,
+          input,
+          max_output_tokens: attempt.maxOutputTokens,
+          text: {
+            format: { type: "json_object" },
+            verbosity: "low",
+          },
+        });
 
-    const response = await client.responses.create({
-      model: config.model,
-      instructions,
-      input,
-      max_output_tokens: 2048,
-    });
+        if (
+          response.status === "incomplete" ||
+          response.incomplete_details?.reason === "max_output_tokens"
+        ) {
+          throw new Error("Model response incomplete (max_output_tokens)");
+        }
 
-    modelOutputText = response.output_text ?? "";
+        const outputText = response.output_text ?? "";
+        if (!outputText.trim()) {
+          throw new Error("Empty model output");
+        }
+
+        const parsedModel = parseFirstJsonObject(outputText);
+        const schemaCheck = AiChatModelOutputSchema.safeParse(parsedModel);
+        if (!schemaCheck.success) {
+          throw schemaCheck.error;
+        }
+
+        const normalized = normalizeAiMindmapOperationIds({
+          state,
+          operations: schemaCheck.data.operations,
+        });
+        if (!normalized.ok) {
+          throw new Error(normalized.message);
+        }
+
+        modelOutput = {
+          ...schemaCheck.data,
+          operations: normalized.operations,
+        };
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!modelOutput) {
+      if (lastError instanceof z.ZodError) {
+        return jsonError(400, "Model output schema validation failed", {
+          issues: lastError.issues,
+        });
+      }
+      const message = lastError instanceof Error ? lastError.message : "Model call failed";
+      if (/empty model output/i.test(message)) {
+        return jsonError(502, "Empty model output");
+      }
+      if (/incomplete/i.test(message) || /max_output_tokens/i.test(message)) {
+        return jsonError(502, "Model output truncated");
+      }
+      return jsonError(400, "Invalid model output", { detail: message });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Model call failed";
     return jsonError(500, "AI provider error", { detail: message });
   }
 
-  if (!modelOutputText.trim()) {
-    return jsonError(502, "Empty model output");
-  }
-
-  let parsedModel: unknown;
-  try {
-    parsedModel = parseFirstJsonObject(modelOutputText);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to parse model JSON";
-    return jsonError(400, "Invalid model output", { detail: message });
-  }
-
-  const parsedOutput = AiChatModelOutputSchema.safeParse(parsedModel);
-  if (!parsedOutput.success) {
-    return jsonError(400, "Model output schema validation failed", {
-      issues: parsedOutput.error.issues,
-    });
+  if (!modelOutput) {
+    return jsonError(500, "AI provider error", { detail: "Model output unavailable" });
   }
 
   const scopeCheck = validateOperationsScope({
     state,
     scope,
     selectedNodeId,
-    operations: parsedOutput.data.operations,
+    operations: modelOutput.operations,
   });
   if (!scopeCheck.ok) {
     return jsonError(400, scopeCheck.message);
   }
 
   try {
-    applyOperations(state, parsedOutput.data.operations);
+    applyOperations(state, modelOutput.operations);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Invalid operations";
     return jsonError(400, message);
@@ -414,8 +473,8 @@ export async function POST(request: Request) {
       {
         thread_id: threadIdResult.threadId,
         role: "assistant",
-        content: parsedOutput.data.assistant_message,
-        operations: parsedOutput.data.operations,
+        content: modelOutput.assistant_message,
+        operations: modelOutput.operations,
         provider: "azure-openai",
         model: modelName || null,
       },
@@ -430,7 +489,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    assistant_message: parsedOutput.data.assistant_message,
-    operations: parsedOutput.data.operations,
+    assistant_message: modelOutput.assistant_message,
+    operations: modelOutput.operations,
   });
 }
