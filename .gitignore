@@ -31,7 +31,9 @@ test-results/
 # misc
 *.tsbuildinfo
 
+# agent / tooling
+.codex/
+
 # supabase
 supabase/.branches/
 supabase/.temp/
-
