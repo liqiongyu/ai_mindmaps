@@ -142,10 +142,34 @@ export async function POST(request: NextRequest) {
       return jsonError(status, message, { detail: rpcError.message });
     }
 
-    if (!rpcData || typeof rpcData !== "object" || !("ok" in rpcData) || rpcData.ok !== true) {
+    const normalized = rpcData as unknown;
+    if (!normalized || typeof normalized !== "object" || !("ok" in normalized)) {
       await supabase.from("mindmaps").delete().eq("id", mindmapId);
       return jsonError(500, "Failed to create mindmap from template", {
         detail: "Invalid RPC response",
+      });
+    }
+
+    if ((normalized as { ok: unknown }).ok !== true) {
+      await supabase.from("mindmaps").delete().eq("id", mindmapId);
+      const code = (normalized as { code?: unknown }).code;
+      if (code === "VERSION_CONFLICT") {
+        const versionRaw = (normalized as { version?: unknown }).version;
+        const serverVersion = typeof versionRaw === "string" ? Number(versionRaw) : versionRaw;
+        if (
+          typeof serverVersion !== "number" ||
+          !Number.isFinite(serverVersion) ||
+          serverVersion < 1
+        ) {
+          return jsonError(500, "Failed to create mindmap from template", {
+            detail: "Invalid serverVersion returned from RPC",
+          });
+        }
+        return jsonError(409, "Version conflict", { code: "VERSION_CONFLICT", serverVersion });
+      }
+
+      return jsonError(500, "Failed to create mindmap from template", {
+        detail: "Unknown RPC response",
       });
     }
 

@@ -327,5 +327,59 @@ describe("/api/mindmaps route", () => {
         "mindmaps.delete",
       ]);
     });
+
+    test("returns 409 when version conflicts during template creation", async () => {
+      const supabase = createSupabaseMock({ userId: "u1" });
+      const templateId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      supabase.__setQueryHandler("mindmap_templates.select", async () => ({
+        data: {
+          id: templateId,
+          title: "学习计划",
+          state: {
+            rootNodeId: "11111111-1111-4aaa-8aaa-111111111111",
+            nodesById: {
+              "11111111-1111-4aaa-8aaa-111111111111": {
+                id: "11111111-1111-4aaa-8aaa-111111111111",
+                parentId: null,
+                text: "学习计划",
+                notes: null,
+                orderIndex: 0,
+              },
+            },
+          },
+        },
+        error: null,
+      }));
+      supabase.__setQueryHandler("mindmaps.insert", async () => ({ data: null, error: null }));
+      supabase.__setQueryHandler("mindmaps.delete", async () => ({ data: null, error: null }));
+      supabase.__setRpcHandler("mma_replace_mindmap_nodes", async () => ({
+        data: { ok: false, code: "VERSION_CONFLICT", version: 2 },
+        error: null,
+      }));
+      mocks.state.supabase = supabase;
+
+      const { POST } = await import("./route");
+
+      const res = await POST(
+        new Request("http://localhost/api/mindmaps", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ templateId }),
+        }) as never,
+      );
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({
+        ok: false,
+        code: "VERSION_CONFLICT",
+        serverVersion: 2,
+      });
+
+      expect(supabase.__calls.queries.map((q) => `${q.table}.${q.operation}`)).toEqual([
+        "mindmap_templates.select",
+        "mindmaps.insert",
+        "mindmaps.delete",
+      ]);
+    });
   });
 });
