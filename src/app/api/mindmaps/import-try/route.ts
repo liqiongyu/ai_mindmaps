@@ -18,7 +18,7 @@ function isMissingAtomicSaveRpc(error: { code?: string; message: string }): bool
 
 const ImportTryDraftRequestSchema = z
   .object({
-    source: z.literal("try"),
+    source: z.enum(["try", "copy"]),
     draft: MindmapStateSchema,
     ui: MindmapUiStateSchema.optional(),
   })
@@ -69,13 +69,16 @@ export async function POST(request: NextRequest) {
     text: r.text,
     notes: r.notes,
     order_index: r.order_index,
+    pos_x: r.pos_x ?? undefined,
+    pos_y: r.pos_y ?? undefined,
   }));
 
-  const { error: rpcError } = await supabase.rpc("mma_replace_mindmap_nodes", {
+  const { data: rpcData, error: rpcError } = await supabase.rpc("mma_replace_mindmap_nodes", {
     p_mindmap_id: mindmapId,
     p_root_node_id: remappedDraft.rootNodeId,
     p_title: title,
     p_nodes: rpcNodes,
+    p_base_version: 1,
   });
 
   if (rpcError) {
@@ -84,6 +87,11 @@ export async function POST(request: NextRequest) {
       ? "Atomic save RPC is missing. Apply Supabase migrations first."
       : "Failed to import mindmap nodes";
     return jsonError(500, message, { detail: rpcError.message });
+  }
+
+  if (!rpcData || typeof rpcData !== "object" || !("ok" in rpcData) || rpcData.ok !== true) {
+    await supabase.from("mindmaps").delete().eq("id", mindmapId);
+    return jsonError(500, "Failed to import mindmap nodes", { detail: "Invalid RPC response" });
   }
 
   if (parsed.data.ui) {

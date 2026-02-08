@@ -28,7 +28,7 @@ describe("/api/mindmaps/[mindmapId]/save route", () => {
       new Request("http://localhost/api/mindmaps/m1/save", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ state: sampleMindmapState }),
+        body: JSON.stringify({ state: sampleMindmapState, baseVersion: 1 }),
       }) as never,
       { params: Promise.resolve({ mindmapId: "m1" }) },
     );
@@ -50,7 +50,7 @@ describe("/api/mindmaps/[mindmapId]/save route", () => {
       new Request("http://localhost/api/mindmaps/m1/save", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ state: sampleMindmapState }),
+        body: JSON.stringify({ state: sampleMindmapState, baseVersion: 1 }),
       }) as never,
       { params: Promise.resolve({ mindmapId: "m1" }) },
     );
@@ -80,13 +80,48 @@ describe("/api/mindmaps/[mindmapId]/save route", () => {
       new Request("http://localhost/api/mindmaps/m1/save", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ state: sampleMindmapState }),
+        body: JSON.stringify({ state: sampleMindmapState, baseVersion: 1 }),
       }) as never,
       { params: Promise.resolve({ mindmapId: "m1" }) },
     );
 
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ ok: false, code: "PERSISTENCE_UNAVAILABLE" });
+  });
+
+  test("returns 409 when version conflicts", async () => {
+    const supabase = createSupabaseMock({ userId: "u1" });
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: {
+        id: "m1",
+        title: "T",
+        root_node_id: sampleMindmapState.rootNodeId,
+      },
+      error: null,
+    }));
+    supabase.__setRpcHandler("mma_replace_mindmap_nodes", async () => ({
+      data: { ok: false, code: "VERSION_CONFLICT", version: 5 },
+      error: null,
+    }));
+    mocks.state.supabase = supabase;
+
+    const { POST } = await import("./route");
+    const res = await POST(
+      new Request("http://localhost/api/mindmaps/m1/save", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ state: sampleMindmapState, baseVersion: 1 }),
+      }) as never,
+      { params: Promise.resolve({ mindmapId: "m1" }) },
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      code: "VERSION_CONFLICT",
+      message: "检测到版本冲突，已阻止覆盖保存。",
+      serverVersion: 5,
+    });
   });
 
   test("returns ok:true when saved", async () => {
@@ -100,7 +135,7 @@ describe("/api/mindmaps/[mindmapId]/save route", () => {
       error: null,
     }));
     supabase.__setRpcHandler("mma_replace_mindmap_nodes", async () => ({
-      data: null,
+      data: { ok: true, version: 2 },
       error: null,
     }));
     mocks.state.supabase = supabase;
@@ -110,12 +145,12 @@ describe("/api/mindmaps/[mindmapId]/save route", () => {
       new Request("http://localhost/api/mindmaps/m1/save", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ state: sampleMindmapState }),
+        body: JSON.stringify({ state: sampleMindmapState, baseVersion: 1 }),
       }) as never,
       { params: Promise.resolve({ mindmapId: "m1" }) },
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    expect(await res.json()).toEqual({ ok: true, version: 2 });
   });
 });

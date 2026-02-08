@@ -10,6 +10,7 @@ export const CreateMindmapRequestSchema = z
 
 export const SaveMindmapRequestSchema = z
   .object({
+    baseVersion: z.number().int().min(1),
     title: z.string().min(1).optional(),
     state: MindmapStateSchema,
   })
