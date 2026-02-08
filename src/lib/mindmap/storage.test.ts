@@ -33,6 +33,27 @@ describe("mindmap storage", () => {
     }
   });
 
+  test("mindmapStateToNodeRows includes node positions when present", () => {
+    const rootNodeId = "00000000-0000-4000-8000-000000000051";
+    const rows = mindmapStateToNodeRows("mindmap_1", {
+      rootNodeId,
+      nodesById: {
+        [rootNodeId]: {
+          id: rootNodeId,
+          parentId: null,
+          text: "Root",
+          notes: null,
+          orderIndex: 0,
+          posX: 12.5,
+          posY: 34.25,
+        },
+      },
+    });
+
+    expect(rows[0].pos_x).toBe(12.5);
+    expect(rows[0].pos_y).toBe(34.25);
+  });
+
   test("MindmapStateSchema rejects missing root node", () => {
     const rootNodeId = "00000000-0000-4000-8000-0000000000ff";
     const result = MindmapStateSchema.safeParse({
