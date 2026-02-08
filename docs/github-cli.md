@@ -1,6 +1,6 @@
 # GitHub 配置与 `gh` 操作手册（MMA）
 
-最后更新：2026-02-06
+最后更新：2026-02-08
 
 本文件用于把 MMA 的 GitHub 侧配置“写成可执行的命令与脚本”。默认策略：**trunk-based（main）+ PR 合并**，并使用 GitHub Actions 做基础 CI。
 
@@ -75,17 +75,21 @@ GitHub 分支保护需要仓库管理员权限。下面命令使用 `gh api` 调
 > “Upgrade to GitHub Pro or make this repository public to enable this feature.”  
 > 这时需要：升级到 GitHub Pro，或将仓库改为 public（或改用后续可用的替代机制）。
 
-说明：
+说明（推荐基线）：
 
 - 必须通过 CI（以及安全检查）
 - 必须走 PR
 - 禁止 force push
-- 可按团队情况调整 required approving reviews 数量
+- `required_approving_review_count` 可按团队策略调整
+- 若你要让 release PR 全自动合并，需满足其一：
+  - 把 `required_approving_review_count` 设为 `0`
+  - 或使用 ruleset 给 `github-actions` / release bot 配置 review 豁免
 
 ```bash
 OWNER="$(gh api user -q .login)"
 REPO="ai_mindmaps"
 BRANCH="main"
+REQUIRED_APPROVALS=0 # 团队若要求人工 review，可改成 1
 
 gh api -X PUT "repos/$OWNER/$REPO/branches/$BRANCH/protection" \
   -H "Accept: application/vnd.github+json" \
@@ -94,7 +98,7 @@ gh api -X PUT "repos/$OWNER/$REPO/branches/$BRANCH/protection" \
   -F required_status_checks[contexts][]="Dependency Review" \
   -F required_status_checks[contexts][]=Vercel \
   -F required_pull_request_reviews[dismiss_stale_reviews]=true \
-  -F required_pull_request_reviews[required_approving_review_count]=0 \
+  -F required_pull_request_reviews[required_approving_review_count]="$REQUIRED_APPROVALS" \
   -F required_conversation_resolution=true \
   -F required_linear_history=true \
   -F enforce_admins=true \
@@ -107,7 +111,25 @@ gh api -X PUT "repos/$OWNER/$REPO/branches/$BRANCH/protection" \
 
 ---
 
-## 5) Secrets（Actions 用）
+## 5) 仓库合并策略（建议）
+
+为支持 release PR 自动合并，建议开启仓库级 Auto-merge，并限制为 squash：
+
+```bash
+OWNER="$(gh api user -q .login)"
+REPO="ai_mindmaps"
+
+gh api -X PATCH "repos/$OWNER/$REPO" \
+  -F allow_auto_merge=true \
+  -F delete_branch_on_merge=true \
+  -F allow_squash_merge=true \
+  -F allow_merge_commit=false \
+  -F allow_rebase_merge=false
+```
+
+---
+
+## 6) Secrets（Actions 用）
 
 推荐先把 key 的“名字”固定下来：
 
@@ -121,6 +143,12 @@ gh api -X PUT "repos/$OWNER/$REPO/branches/$BRANCH/protection" \
 - `AZURE_OPENAI_DEPLOYMENT`（用于 Azure OpenAI e2e）
 - `AZURE_OPENAI_API_VERSION`（可选，用于 Azure OpenAI e2e）
 - `AZURE_OPENAI_MODEL`（可选，用于 Azure OpenAI e2e）
+- `RELEASE_PLEASE_TOKEN`（用于 release PR 触发 `CI` / `Dependency Review`）
+
+`RELEASE_PLEASE_TOKEN` 建议使用 Fine-grained PAT（仅授权当前仓库）：
+
+- Repository permissions / Contents: `Read and write`
+- Repository permissions / Pull requests: `Read and write`
 
 设置示例：
 
@@ -129,11 +157,12 @@ gh secret set NEXT_PUBLIC_SUPABASE_URL
 gh secret set NEXT_PUBLIC_SUPABASE_ANON_KEY
 gh secret set MMA_LLM_API_KEY
 gh secret set MMA_LLM_MODEL
+gh secret set RELEASE_PLEASE_TOKEN
 ```
 
 ---
 
-## 6) 常用 PR 工作流（推荐）
+## 7) 常用 PR 工作流（推荐）
 
 ```bash
 # 新建分支

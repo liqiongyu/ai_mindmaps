@@ -1,0 +1,42 @@
+name: Release Please Auto Merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: release-please-automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-auto-merge:
+    name: Enable auto-merge for release PR
+    if: >
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.pull_request.user.login == 'app/github-actions' || github.event.pull_request.user.login == 'github-actions[bot]') &&
+      github.event.pull_request.state == 'open' &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          already_enabled="$(gh pr view "${PR_NUMBER}" --repo "${REPO}" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+          if [ "${already_enabled}" = "true" ]; then
+            echo "Auto-merge already enabled for PR #${PR_NUMBER}."
+            exit 0
+          fi
+
+          gh pr merge "${PR_NUMBER}" --repo "${REPO}" --auto --squash --delete-branch
