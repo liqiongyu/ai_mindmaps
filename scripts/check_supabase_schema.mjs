@@ -19,7 +19,14 @@ const supabase = createClient(url, anonKey, {
   },
 });
 
-const tables = ["mindmaps", "mindmap_nodes", "mindmap_ui_state", "chat_threads", "chat_messages"];
+const tables = [
+  "mindmaps",
+  "mindmap_nodes",
+  "mindmap_ui_state",
+  "mindmap_templates",
+  "chat_threads",
+  "chat_messages",
+];
 let allOk = true;
 
 for (const table of tables) {
