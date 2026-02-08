@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.0](https://github.com/liqiongyu/ai_mindmaps/compare/v1.0.0...v1.1.0) (2026-02-08)
+
+
+### Features
+
+* [P2-02] 模板库与场景化新建导图 ([#130](https://github.com/liqiongyu/ai_mindmaps/issues/130)) ([0e5aca3](https://github.com/liqiongyu/ai_mindmaps/commit/0e5aca3759ac4f99e398118134b21eaccde6c041))
+* **ai:** context budget + actionable chat errors ([#125](https://github.com/liqiongyu/ai_mindmaps/issues/125)) ([f787bc5](https://github.com/liqiongyu/ai_mindmaps/commit/f787bc5b008dd18f85078908d5223cd722ef04b5))
+* **chat:** export audit JSON ([#126](https://github.com/liqiongyu/ai_mindmaps/issues/126)) ([e4f5705](https://github.com/liqiongyu/ai_mindmaps/commit/e4f57055b13966db3bd0e0851d0e0ebf9a5be292))
+* **feedback:** non-blocking UI feedback ([#119](https://github.com/liqiongyu/ai_mindmaps/issues/119)) ([f9e570a](https://github.com/liqiongyu/ai_mindmaps/commit/f9e570a787f02d35e9abc49777e920cb6f70ccce))
+* **p1-04:** 列表分页搜索与画布性能优化 ([#127](https://github.com/liqiongyu/ai_mindmaps/issues/127)) ([0acbd69](https://github.com/liqiongyu/ai_mindmaps/commit/0acbd6982a08a01273f29dd1d3da842627a882fa))
+* **public:** improve public page reading experience ([#131](https://github.com/liqiongyu/ai_mindmaps/issues/131)) ([d0ddbc2](https://github.com/liqiongyu/ai_mindmaps/commit/d0ddbc25d47c7c5936e9aa2b98cb2852fc0fffc6))
+* **trust:** 企业信任包（隐私/安全/审计） ([#133](https://github.com/liqiongyu/ai_mindmaps/issues/133)) ([c2343e7](https://github.com/liqiongyu/ai_mindmaps/commit/c2343e7fa24118a77b812736402ef82f519011f0))
+* **usage:** 用量配额与套餐基础能力 ([#132](https://github.com/liqiongyu/ai_mindmaps/issues/132)) ([b5bfc2d](https://github.com/liqiongyu/ai_mindmaps/commit/b5bfc2d0694557fdbd5679e62e4cce20ffa3315c))
+
+
+### Bug Fixes
+
+* **save:** enforce atomic persistence contract ([#122](https://github.com/liqiongyu/ai_mindmaps/issues/122)) ([db278e5](https://github.com/liqiongyu/ai_mindmaps/commit/db278e58ee070a1b74dcdc05eb67e5abb83e5803))
+
 ## 1.0.0 (2026-02-08)
 
 ### Features
