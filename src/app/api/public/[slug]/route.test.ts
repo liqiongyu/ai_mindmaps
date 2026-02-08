@@ -87,4 +87,50 @@ describe("/api/public/[slug] route", () => {
       mindmap: { title: "T", rootNodeId: sampleMindmapState.rootNodeId },
     });
   });
+
+  test("returns focusedNode when nodeId query matches", async () => {
+    const supabase = createSupabaseMock();
+    supabase.__setRpcHandler("mma_get_public_mindmap_snapshot", async () => ({
+      data: [
+        {
+          title: "T",
+          root_node_id: sampleMindmapState.rootNodeId,
+          updated_at: "2026-02-08T00:00:00.000Z",
+          nodes: Object.values(sampleMindmapState.nodesById).map((n) => ({
+            id: n.id,
+            parent_id: n.parentId,
+            text: n.text,
+            notes: n.notes,
+            order_index: n.orderIndex,
+          })),
+        },
+      ],
+      error: null,
+    }));
+    mocks.state.supabase = supabase;
+
+    const { GET } = await import("./route");
+    const res = await GET(
+      new Request(
+        `http://localhost/api/public/s1?nodeId=00000000-0000-4000-8000-000000000005`,
+      ) as never,
+      { params: Promise.resolve({ slug: "s1" }) },
+    );
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as unknown;
+    expect(json).toMatchObject({
+      ok: true,
+      focusedNode: {
+        id: "00000000-0000-4000-8000-000000000005",
+        text: "目标",
+        notes: null,
+        breadcrumb: [
+          { id: "00000000-0000-4000-8000-000000000001", text: "MindMaps AI" },
+          { id: "00000000-0000-4000-8000-000000000002", text: "学习" },
+          { id: "00000000-0000-4000-8000-000000000005", text: "目标" },
+        ],
+      },
+    });
+  });
 });
