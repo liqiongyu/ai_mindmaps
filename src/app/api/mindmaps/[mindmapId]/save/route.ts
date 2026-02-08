@@ -105,6 +105,8 @@ export async function POST(
     text: r.text,
     notes: r.notes,
     order_index: r.order_index,
+    pos_x: r.pos_x ?? undefined,
+    pos_y: r.pos_y ?? undefined,
   }));
 
   const { data: rpcData, error: rpcError } = await supabase.rpc("mma_replace_mindmap_nodes", {

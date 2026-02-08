@@ -98,6 +98,7 @@ export function mindmapStateToNodeRows(mindmapId: string, state: MindmapState): 
   const visit = (nodeId: string) => {
     const node = state.nodesById[nodeId];
     if (!node) return;
+    const hasPosition = node.posX !== undefined && node.posY !== undefined;
     result.push({
       id: node.id,
       mindmap_id: mindmapId,
@@ -105,6 +106,7 @@ export function mindmapStateToNodeRows(mindmapId: string, state: MindmapState): 
       text: node.text,
       notes: node.notes,
       order_index: node.orderIndex,
+      ...(hasPosition ? { pos_x: node.posX, pos_y: node.posY } : {}),
     });
 
     for (const child of childrenByParentId[nodeId] ?? []) {
