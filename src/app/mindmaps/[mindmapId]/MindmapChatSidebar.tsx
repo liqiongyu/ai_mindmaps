@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/chatConstraints";
 import type { Operation } from "@/lib/mindmap/ops";
 import { summarizeOperations } from "@/lib/mindmap/operationSummary";
+import { uiFeedback } from "@/lib/ui/feedback";
 
 type ChatScope = "global" | "node";
 type ChatMessage = {
@@ -259,6 +260,18 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
         throw new Error(applyResult.message);
       }
 
+      const summary = summarizeOperations(json.operations);
+      const move = summary.move + summary.reorder;
+      const shouldShowSummary =
+        summary.add > 0 || summary.rename > 0 || move > 0 || summary.delete > 0;
+      if (shouldShowSummary) {
+        uiFeedback.enqueue({
+          type: "success",
+          title: "AI 已应用改动",
+          message: `变更摘要：新增 ${summary.add} · 改名 ${summary.rename} · 移动 ${move} · 删除 ${summary.delete}`,
+        });
+      }
+
       setMessagesByThreadKey((prev) => ({
         ...prev,
         [activeThreadKey]: [
@@ -278,6 +291,19 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
     } catch (err) {
       const message = err instanceof Error ? err.message : "AI 请求失败";
       setError(message);
+      uiFeedback.enqueue({
+        type: "error",
+        title: "AI 请求失败",
+        message,
+        actions: content
+          ? [
+              {
+                label: "重试",
+                onClick: () => setInput(content),
+              },
+            ]
+          : [],
+      });
     } finally {
       setSending(false);
     }
@@ -429,7 +455,11 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
                               setCopiedOpsKey((current) => (current === key ? null : current));
                             }, 1500);
                           } catch {
-                            globalThis.alert("复制失败");
+                            uiFeedback.enqueue({
+                              type: "error",
+                              title: "复制失败",
+                              message: "无法写入剪贴板，请手动复制。",
+                            });
                           }
                         }}
                         type="button"
@@ -448,17 +478,26 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
                   <button
                     className="mt-1 w-fit rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:bg-zinc-950 dark:text-red-200 dark:hover:bg-red-950/30"
                     disabled={sending}
-                    onClick={() => {
+                    onClick={async () => {
                       const targetPresentId = m.rollbackToPresentId;
                       if (typeof targetPresentId !== "number") return;
-                      const confirmed = globalThis.confirm(
-                        "确定回滚到此条 AI 前？你可以使用撤销/重做恢复。",
-                      );
+                      const confirmed = await uiFeedback.confirm({
+                        title: "回滚确认",
+                        message: "确定回滚到此条 AI 前？你可以使用撤销/重做恢复。",
+                        confirmLabel: "回滚",
+                        cancelLabel: "取消",
+                        tone: "danger",
+                      });
                       if (!confirmed) return;
                       setError(null);
                       const result = onRollbackToPresentId(targetPresentId);
                       if (!result.ok) {
                         setError(result.message);
+                        uiFeedback.enqueue({
+                          type: "error",
+                          title: "回滚失败",
+                          message: result.message,
+                        });
                       }
                     }}
                     type="button"

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
+import { UiFeedbackRoot } from "./UiFeedbackRoot";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -34,6 +36,7 @@ export default function RootLayout({
         <div className="outline-none" id="main-content" tabIndex={-1}>
           {children}
         </div>
+        <UiFeedbackRoot />
       </body>
     </html>
   );

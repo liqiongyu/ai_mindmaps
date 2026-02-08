@@ -29,6 +29,7 @@ import type { MindmapState } from "@/lib/mindmap/ops";
 import type { OperationHighlightKind } from "@/lib/mindmap/operationSummary";
 import { mindmapStateToFlow } from "@/lib/mindmap/flow";
 import type { MindmapViewport } from "@/lib/mindmap/uiState";
+import { uiFeedback } from "@/lib/ui/feedback";
 
 type ExportResult = { ok: true } | { ok: false; message: string };
 
@@ -106,7 +107,7 @@ const MindmapNode = memo(function MindmapNode({
             const result = commit();
             if (!result.ok) {
               if (result.reason === "empty") {
-                globalThis.alert("标题不能为空");
+                uiFeedback.enqueue({ type: "error", title: "编辑失败", message: "标题不能为空" });
               }
               data.onCancelEditNodeId?.(id);
             }
@@ -126,7 +127,7 @@ const MindmapNode = memo(function MindmapNode({
               skipNextBlurRef.current = true;
               const result = commit();
               if (!result.ok && result.reason === "empty") {
-                globalThis.alert("标题不能为空");
+                uiFeedback.enqueue({ type: "error", title: "编辑失败", message: "标题不能为空" });
               }
               return;
             }

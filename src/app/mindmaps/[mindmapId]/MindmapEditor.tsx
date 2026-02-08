@@ -34,6 +34,7 @@ import {
   TRY_DRAFT_STORAGE_KEY,
 } from "@/lib/mindmap/tryDraft";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { uiFeedback } from "@/lib/ui/feedback";
 
 type EditorActionResult =
   | { ok: true; nextState: MindmapState; nextSelectedNodeId: string | null }
@@ -789,7 +790,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         return { ok: true };
       } catch (err) {
         const message = err instanceof Error ? err.message : "重命名失败";
-        globalThis.alert(message);
+        uiFeedback.enqueue({ type: "error", title: "重命名失败", message });
         return { ok: false };
       }
     },
@@ -807,7 +808,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         nodeId,
       );
       if (!result.ok) {
-        globalThis.alert(result.message);
+        uiFeedback.enqueue({ type: "error", title: "新增子节点失败", message: result.message });
         return null;
       }
 
@@ -839,7 +840,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         nodeId,
       );
       if (!result.ok) {
-        globalThis.alert(result.message);
+        uiFeedback.enqueue({ type: "error", title: "新增同级失败", message: result.message });
         return null;
       }
 
@@ -858,7 +859,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
       if (nodeId === current.rootNodeId) return;
 
       const result = apply([{ type: "delete_node", nodeId }], current.rootNodeId);
-      if (!result.ok) return globalThis.alert(result.message);
+      if (!result.ok) {
+        uiFeedback.enqueue({ type: "error", title: "删除节点失败", message: result.message });
+        return;
+      }
 
       commit(result.nextState);
       setSelectedNodeId(result.nextSelectedNodeId);
@@ -983,7 +987,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
         [{ type: "reorder_children", parentId: selected.parentId, orderedChildIds }],
         selectedNodeId,
       );
-      if (!result.ok) return globalThis.alert(result.message);
+      if (!result.ok) {
+        uiFeedback.enqueue({ type: "error", title: "调整顺序失败", message: result.message });
+        return;
+      }
 
       commit(result.nextState);
       setSelectedNodeId(result.nextSelectedNodeId);
@@ -1008,7 +1015,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
       [{ type: "move_node", nodeId: selectedNodeId, newParentId }],
       selectedNodeId,
     );
-    if (!result.ok) return globalThis.alert(result.message);
+    if (!result.ok) {
+      uiFeedback.enqueue({ type: "error", title: "移动节点失败", message: result.message });
+      return;
+    }
 
     commit(result.nextState);
     setSelectedNodeId(result.nextSelectedNodeId);
@@ -1034,7 +1044,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
       ],
       selectedNodeId,
     );
-    if (!result.ok) return globalThis.alert(result.message);
+    if (!result.ok) {
+      uiFeedback.enqueue({ type: "error", title: "移动节点失败", message: result.message });
+      return;
+    }
 
     commit(result.nextState);
     setSelectedNodeId(result.nextSelectedNodeId);
@@ -1227,7 +1240,13 @@ export function MindmapEditor(props: MindmapEditorProps) {
     if (!persistedMindmapId) return;
     if (!shareUrl) return;
 
-    const confirmed = window.confirm("停止分享后，旧链接将无法访问。继续？");
+    const confirmed = await uiFeedback.confirm({
+      title: "停止分享？",
+      message: "停止分享后，旧链接将无法访问。继续？",
+      confirmLabel: "停止分享",
+      cancelLabel: "取消",
+      tone: "danger",
+    });
     if (!confirmed) return;
 
     setStoppingShare(true);
@@ -1257,7 +1276,13 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
   const onDeleteMindmap = useCallback(async () => {
     if (!persistedMindmapId) return;
-    const confirmed = window.confirm("确定删除该导图？此操作无法撤销。");
+    const confirmed = await uiFeedback.confirm({
+      title: "删除导图？",
+      message: "确定删除该导图？此操作无法撤销。",
+      confirmLabel: "删除",
+      cancelLabel: "取消",
+      tone: "danger",
+    });
     if (!confirmed) return;
 
     setDeletingMindmap(true);

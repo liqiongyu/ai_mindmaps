@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import { uiFeedback } from "@/lib/ui/feedback";
+
 type MindmapListItem = {
   id: string;
   title: string;
@@ -100,7 +102,13 @@ export function MindmapsListClient({ initialMindmaps }: { initialMindmaps: Mindm
                   className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:text-red-200 dark:hover:bg-red-950/30"
                   disabled={submitting || deletingId === m.id}
                   onClick={async () => {
-                    const confirmed = window.confirm(`删除“${m.title}”？这将永久删除该导图。`);
+                    const confirmed = await uiFeedback.confirm({
+                      title: "删除导图？",
+                      message: `删除“${m.title}”？这将永久删除该导图。`,
+                      confirmLabel: "删除",
+                      cancelLabel: "取消",
+                      tone: "danger",
+                    });
                     if (!confirmed) return;
 
                     setDeletingId(m.id);
