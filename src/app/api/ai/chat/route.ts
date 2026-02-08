@@ -20,6 +20,7 @@ import { nodeRowsToMindmapState } from "@/lib/mindmap/storage";
 import { validateOperationsScope } from "@/lib/mindmap/scope";
 import { createAzureOpenAIClient, getAzureOpenAIConfigFromEnv } from "@/lib/llm/azureOpenAI";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { logApi } from "@/lib/telemetry/apiLog";
 
 function jsonError(status: number, message: string, extra?: Record<string, unknown>) {
   return NextResponse.json({ ok: false, message, ...extra }, { status });
@@ -254,23 +255,67 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
+  const route = "/api/ai/chat";
+  const method = "POST";
+  let userId: string | null = null;
+
+  const respondOk = (payload: Record<string, unknown>) => {
+    logApi({
+      type: "api",
+      route,
+      method,
+      status: 200,
+      ok: true,
+      duration_ms: Date.now() - startedAt,
+      user_id: userId,
+    });
+    return NextResponse.json({ ok: true, ...payload });
+  };
+
+  const respondError = (
+    status: number,
+    code: string,
+    message: string,
+    extra?: Record<string, unknown>,
+  ) => {
+    logApi(
+      {
+        type: "api",
+        route,
+        method,
+        status,
+        ok: false,
+        code,
+        duration_ms: Date.now() - startedAt,
+        user_id: userId,
+        detail: typeof extra?.detail === "string" ? extra.detail : undefined,
+      },
+      status >= 500 ? "error" : "warn",
+    );
+    return NextResponse.json({ ok: false, code, message, ...extra }, { status });
+  };
+
   const supabase = await createSupabaseServerClient();
   const { data: authData, error: authError } = await supabase.auth.getUser();
 
   if (authError || !authData.user) {
-    return jsonError(401, "Unauthorized");
+    return respondError(401, "UNAUTHORIZED", "Unauthorized");
   }
+  userId = authData.user.id;
 
   let json: unknown;
   try {
     json = await request.json();
   } catch {
-    return jsonError(400, "Invalid JSON body");
+    return respondError(400, "INVALID_JSON", "Invalid JSON body");
   }
 
   const parsedRequest = AiChatRequestSchema.safeParse(json);
   if (!parsedRequest.success) {
-    return jsonError(400, "Invalid request body", { issues: parsedRequest.error.issues });
+    return respondError(400, "INVALID_BODY", "Invalid request body", {
+      issues: parsedRequest.error.issues,
+    });
   }
 
   const {
@@ -282,6 +327,14 @@ export async function POST(request: Request) {
   } = parsedRequest.data;
   const constraints = normalizeAiChatConstraints(requestedConstraints);
 
+  if (scope === "node" && !selectedNodeId) {
+    return respondError(
+      400,
+      "MISSING_SELECTED_NODE_ID",
+      "selectedNodeId is required for node-scoped chat",
+    );
+  }
+
   const { data: mindmap, error: mindmapError } = await supabase
     .from("mindmaps")
     .select("id,root_node_id")
@@ -290,10 +343,12 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (mindmapError) {
-    return jsonError(500, "Failed to load mindmap", { detail: mindmapError.message });
+    return respondError(500, "MINDMAP_LOAD_FAILED", "Failed to load mindmap", {
+      detail: mindmapError.message,
+    });
   }
   if (!mindmap) {
-    return jsonError(404, "Mindmap not found");
+    return respondError(404, "MINDMAP_NOT_FOUND", "Mindmap not found");
   }
 
   const { data: nodeRows, error: nodesError } = await supabase
@@ -302,12 +357,14 @@ export async function POST(request: Request) {
     .eq("mindmap_id", mindmapId);
 
   if (nodesError) {
-    return jsonError(500, "Failed to load mindmap nodes", { detail: nodesError.message });
+    return respondError(500, "NODES_LOAD_FAILED", "Failed to load mindmap nodes", {
+      detail: nodesError.message,
+    });
   }
 
   const nodesParsed = z.array(MindmapNodeRowSchema).safeParse(nodeRows ?? []);
   if (!nodesParsed.success) {
-    return jsonError(500, "Failed to parse mindmap nodes");
+    return respondError(500, "NODES_PARSE_FAILED", "Failed to parse mindmap nodes");
   }
 
   const state = nodeRowsToMindmapState(mindmap.root_node_id, nodesParsed.data);
@@ -363,11 +420,14 @@ export async function POST(request: Request) {
   } catch (err) {
     const detail = err instanceof Error ? err.message : "Unknown error";
     if (scope === "node" && isNodeNotFoundError(detail)) {
-      return jsonError(409, "Selected node is out of sync. Please wait for auto-save and retry.", {
-        detail,
-      });
+      return respondError(
+        409,
+        "CONTEXT_NODE_OUT_OF_SYNC",
+        "Selected node is out of sync. Please wait for auto-save and retry.",
+        { detail },
+      );
     }
-    return jsonError(500, "Failed to build AI context", { detail });
+    return respondError(500, "CONTEXT_BUILD_FAILED", "Failed to build AI context", { detail });
   }
 
   const input = [
@@ -452,26 +512,31 @@ export async function POST(request: Request) {
 
     if (!modelOutput) {
       if (lastError instanceof z.ZodError) {
-        return jsonError(400, "Model output schema validation failed", {
-          issues: lastError.issues,
-        });
+        return respondError(
+          502,
+          "MODEL_OUTPUT_SCHEMA_INVALID",
+          "Model output schema validation failed",
+          {
+            issues: lastError.issues,
+          },
+        );
       }
       const message = lastError instanceof Error ? lastError.message : "Model call failed";
       if (/empty model output/i.test(message)) {
-        return jsonError(502, "Empty model output");
+        return respondError(502, "MODEL_OUTPUT_EMPTY", "Empty model output");
       }
       if (/incomplete/i.test(message) || /max_output_tokens/i.test(message)) {
-        return jsonError(502, "Model output truncated");
+        return respondError(502, "MODEL_OUTPUT_TRUNCATED", "Model output truncated");
       }
-      return jsonError(400, "Invalid model output", { detail: message });
+      return respondError(502, "MODEL_OUTPUT_INVALID", "Invalid model output", { detail: message });
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Model call failed";
-    return jsonError(500, "AI provider error", { detail: message });
+    return respondError(502, "PROVIDER_ERROR", "AI provider error", { detail: message });
   }
 
   if (!modelOutput) {
-    return jsonError(500, "AI provider error", { detail: "Model output unavailable" });
+    return respondError(500, "MODEL_OUTPUT_UNAVAILABLE", "Model output unavailable");
   }
 
   const constraintCheck = validateAiChatOperationsAgainstConstraints({
@@ -479,7 +544,7 @@ export async function POST(request: Request) {
     operations: modelOutput.operations,
   });
   if (!constraintCheck.ok) {
-    return jsonError(400, constraintCheck.message);
+    return respondError(400, "CONSTRAINT_VIOLATION", constraintCheck.message);
   }
 
   const scopeCheck = validateOperationsScope({
@@ -489,18 +554,14 @@ export async function POST(request: Request) {
     operations: modelOutput.operations,
   });
   if (!scopeCheck.ok) {
-    return jsonError(400, scopeCheck.message);
+    return respondError(400, "SCOPE_VIOLATION", scopeCheck.message);
   }
 
   try {
     applyOperations(state, modelOutput.operations);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Invalid operations";
-    return jsonError(400, message);
-  }
-
-  if (scope === "node" && !selectedNodeId) {
-    return jsonError(400, "selectedNodeId is required for node-scoped chat");
+    return respondError(400, "OPERATIONS_APPLY_FAILED", message);
   }
 
   const provider = "azure-openai" as const;
@@ -531,14 +592,17 @@ export async function POST(request: Request) {
     if (!insertError) {
       chatPersisted = true;
     } else if (!isMissingChatPersistenceSchema(insertError)) {
-      return jsonError(500, "Failed to persist chat messages", { detail: insertError.message });
+      return respondError(500, "CHAT_PERSIST_MESSAGES_FAILED", "Failed to persist chat messages", {
+        detail: insertError.message,
+      });
     }
   } else if (!threadIdResult.missingSchema) {
-    return jsonError(500, "Failed to persist chat thread", { detail: threadIdResult.message });
+    return respondError(500, "CHAT_PERSIST_THREAD_FAILED", "Failed to persist chat thread", {
+      detail: threadIdResult.message,
+    });
   }
 
-  return NextResponse.json({
-    ok: true,
+  return respondOk({
     assistant_message: modelOutput.assistant_message,
     operations: modelOutput.operations,
     provider,

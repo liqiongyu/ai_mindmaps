@@ -34,6 +34,7 @@ import {
   TRY_DRAFT_STORAGE_KEY,
 } from "@/lib/mindmap/tryDraft";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { track } from "@/lib/telemetry/client";
 import { uiFeedback } from "@/lib/ui/feedback";
 
 type EditorActionResult =
@@ -160,6 +161,8 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const tryDraftJsonRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dangerMenuRef = useRef<HTMLDetailsElement | null>(null);
+  const lastEditorOpenedKeyRef = useRef<string | null>(null);
+  const tryDraftDetectedAfterAuthTrackedRef = useRef(false);
 
   const selectedNode = state && selectedNodeId ? state.nodesById[selectedNodeId] : null;
 
@@ -234,6 +237,21 @@ export function MindmapEditor(props: MindmapEditorProps) {
   }, [persistedMindmapId]);
 
   useEffect(() => {
+    const key = `${props.mode}:${persistedMindmapId ?? "none"}`;
+    if (lastEditorOpenedKeyRef.current === key) return;
+    lastEditorOpenedKeyRef.current = key;
+
+    if (props.mode === "demo") return;
+    if (props.mode === "try") {
+      track("try_opened");
+    }
+    track("editor_opened", {
+      mode: props.mode,
+      mindmapId: persistedMindmapId ?? undefined,
+    });
+  }, [persistedMindmapId, props.mode]);
+
+  useEffect(() => {
     if (props.mode !== "try") return;
 
     const supabase = createSupabaseBrowserClient();
@@ -258,6 +276,15 @@ export function MindmapEditor(props: MindmapEditorProps) {
       authSubscription.subscription.unsubscribe();
     };
   }, [props.mode]);
+
+  useEffect(() => {
+    if (props.mode !== "try") return;
+    if (!authedUserId) return;
+    if (!initialTryDraft) return;
+    if (tryDraftDetectedAfterAuthTrackedRef.current) return;
+    tryDraftDetectedAfterAuthTrackedRef.current = true;
+    track("try_draft_detected_after_auth");
+  }, [authedUserId, initialTryDraft, props.mode]);
 
   useEffect(() => {
     if (props.mode !== "try") return;
@@ -511,6 +538,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         setPersistedSavePaused(false);
         setSaveStatus("saved");
         setSaveError(null);
+        track("mindmap_saved", { mindmapId: persistedMindmapId });
       }
     } catch (err) {
       if (saveSeqRef.current === requestId) {
@@ -871,6 +899,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
       }
 
       commit(result.nextState);
+      track("node_added", { kind: "child" });
       setSelectedNodeId(nodeId);
       setEditingNodeId(nodeId);
       return nodeId;
@@ -903,6 +932,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
       }
 
       commit(result.nextState);
+      track("node_added", { kind: "sibling" });
       setSelectedNodeId(nodeId);
       setEditingNodeId(nodeId);
       return nodeId;
@@ -1279,6 +1309,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
       const url = new URL(`/public/${json.publicSlug}`, window.location.origin).toString();
       setShareUrl(url);
+      track("share_link_generated", { mindmapId: persistedMindmapId });
 
       try {
         await navigator.clipboard.writeText(url);
@@ -1441,6 +1472,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         throw new Error((json && "message" in json && json.message) || `导入失败（${res.status}）`);
       }
 
+      track("try_draft_imported", { mindmapId: json.mindmapId });
       stopTryDraftPersistenceAndClear();
       setTryDraftImportOpen(false);
       router.push(`/mindmaps/${json.mindmapId}`);
@@ -1511,6 +1543,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
         if (!result.ok) {
           throw new Error(result.message);
         }
+        track("export_succeeded", { format, mindmapId: persistedMindmapId ?? undefined });
       } catch (err) {
         const message = err instanceof Error ? err.message : "导出失败";
         setExportError(message);

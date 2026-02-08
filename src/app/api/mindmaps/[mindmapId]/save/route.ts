@@ -3,10 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SaveMindmapRequestSchema } from "@/lib/mindmap/api";
 import { mindmapStateToNodeRows } from "@/lib/mindmap/storage";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-function jsonError(status: number, message: string, extra?: Record<string, unknown>) {
-  return NextResponse.json({ ok: false, message, ...extra }, { status });
-}
+import { logApi } from "@/lib/telemetry/apiLog";
 
 function isMissingAtomicSaveRpc(error: { code?: string; message: string }): boolean {
   if (error.code === "PGRST202") return true;
@@ -18,23 +15,50 @@ export async function POST(
   { params }: { params: Promise<{ mindmapId: string }> },
 ) {
   const { mindmapId } = await params;
+  const startedAt = Date.now();
+  const route = "/api/mindmaps/[mindmapId]/save";
+  const method = "POST";
+  let userId: string | null = null;
+
+  const respond = (
+    status: number,
+    payload: { ok: true } | { ok: false; message: string; code?: string; detail?: string },
+  ) => {
+    logApi(
+      {
+        type: "api",
+        route,
+        method,
+        status,
+        ok: payload.ok,
+        code: payload.ok ? undefined : payload.code,
+        duration_ms: Date.now() - startedAt,
+        user_id: userId,
+        detail: payload.ok ? undefined : payload.detail,
+      },
+      payload.ok ? "info" : status >= 500 ? "error" : "warn",
+    );
+    return NextResponse.json(payload, { status });
+  };
+
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.getUser();
 
   if (error || !data.user) {
-    return jsonError(401, "Unauthorized");
+    return respond(401, { ok: false, code: "UNAUTHORIZED", message: "Unauthorized" });
   }
+  userId = data.user.id;
 
   let json: unknown;
   try {
     json = await request.json();
   } catch {
-    return jsonError(400, "Invalid JSON body");
+    return respond(400, { ok: false, code: "INVALID_JSON", message: "Invalid JSON body" });
   }
 
   const parsed = SaveMindmapRequestSchema.safeParse(json);
   if (!parsed.success) {
-    return jsonError(400, "Invalid request body", { issues: parsed.error.issues });
+    return respond(400, { ok: false, code: "INVALID_BODY", message: "Invalid request body" });
   }
 
   const { data: mindmap, error: mindmapError } = await supabase
@@ -45,14 +69,19 @@ export async function POST(
     .maybeSingle();
 
   if (mindmapError) {
-    return jsonError(500, "Failed to load mindmap", { detail: mindmapError.message });
+    return respond(500, {
+      ok: false,
+      code: "MINDMAP_LOAD_FAILED",
+      message: "Failed to load mindmap",
+      detail: mindmapError.message,
+    });
   }
   if (!mindmap) {
-    return jsonError(404, "Mindmap not found");
+    return respond(404, { ok: false, code: "MINDMAP_NOT_FOUND", message: "Mindmap not found" });
   }
 
   if (parsed.data.state.rootNodeId !== mindmap.root_node_id) {
-    return jsonError(400, "rootNodeId mismatch", { code: "ROOT_NODE_MISMATCH" });
+    return respond(400, { ok: false, code: "ROOT_NODE_MISMATCH", message: "rootNodeId mismatch" });
   }
 
   const inferredTitle =
@@ -78,17 +107,22 @@ export async function POST(
   });
 
   if (!rpcError) {
-    return NextResponse.json({ ok: true });
+    return respond(200, { ok: true });
   }
 
   if (isMissingAtomicSaveRpc(rpcError)) {
-    return jsonError(503, "保存能力不可用：原子保存 RPC 缺失。请先应用 Supabase migrations。", {
+    return respond(503, {
+      ok: false,
       code: "PERSISTENCE_UNAVAILABLE",
+      message: "保存能力不可用：原子保存 RPC 缺失。请先应用 Supabase migrations。",
+      detail: rpcError.message,
     });
   }
 
-  return jsonError(500, "Failed to save mindmap nodes", {
+  return respond(500, {
+    ok: false,
     code: "SAVE_FAILED",
+    message: "Failed to save mindmap nodes",
     detail: rpcError.message,
   });
 }

@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { LandingTrackLink } from "./LandingTrackLink";
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-zinc-50 dark:from-zinc-950 dark:to-zinc-950">
@@ -10,12 +12,14 @@ export default function Home() {
           </Link>
 
           <nav className="flex items-center gap-2">
-            <Link
+            <LandingTrackLink
               className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              event="landing_cta_click"
+              eventProps={{ placement: "header" }}
               href="/try"
             >
               立即体验
-            </Link>
+            </LandingTrackLink>
             <Link
               className="px-2 py-2 text-sm text-zinc-700 hover:text-zinc-900 dark:text-zinc-200 dark:hover:text-white"
               href="/login"
@@ -45,12 +49,14 @@ export default function Home() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <Link
+              <LandingTrackLink
                 className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                event="landing_cta_click"
+                eventProps={{ placement: "hero" }}
                 href="/try"
               >
                 立即体验（免登录）
-              </Link>
+              </LandingTrackLink>
               <Link
                 className="rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
                 href="/login"

@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/chatConstraints";
 import type { Operation } from "@/lib/mindmap/ops";
 import { summarizeOperations } from "@/lib/mindmap/operationSummary";
+import { track } from "@/lib/telemetry/client";
 import { uiFeedback } from "@/lib/ui/feedback";
 
 type ChatScope = "global" | "node";
@@ -228,6 +229,12 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
     setAttemptedLoadByThreadKey((prev) => ({ ...prev, [activeThreadKey]: true }));
 
     try {
+      track("ai_request_sent", {
+        mindmapId,
+        scope,
+        selectedNodeId: scope === "node" ? selectedNodeId : null,
+      });
+
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -262,6 +269,12 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
       if (!applyResult.ok) {
         throw new Error(applyResult.message);
       }
+
+      track("ai_ops_applied", {
+        mindmapId,
+        scope,
+        operationsCount: json.operations.length,
+      });
 
       const summary = summarizeOperations(json.operations);
       const move = summary.move + summary.reorder;
