@@ -234,6 +234,142 @@ describe("/api/ai/chat/export route", () => {
     ]);
   });
 
+  test("export payload includes metadata when available (constraints snapshot)", async () => {
+    const rootNodeId = "00000000-0000-4000-8000-000000000001";
+    const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase);
+    mockConsumeQuota(supabase);
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: { id: "m1" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_threads.select", async () => ({
+      data: { id: "t1", scope: "global", node_id: null, created_at: "2026-02-08T00:00:00.000Z" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_messages.select", async () => ({
+      data: [
+        {
+          id: "msg1",
+          role: "assistant",
+          content: "done",
+          operations: [{ type: "add_node", nodeId: "n1", parentId: rootNodeId, text: "New" }],
+          provider: "openai",
+          model: "gpt-4o-mini",
+          metadata: {
+            constraints: {
+              outputLanguage: "zh",
+              branchCount: 4,
+              depth: 2,
+              allowMove: true,
+              allowDelete: false,
+            },
+            changeSummary: { added: 1 },
+          },
+          created_at: "2026-02-08T00:00:01.000Z",
+        },
+      ],
+      error: null,
+    }));
+    mocks.state.supabase = supabase;
+
+    const { GET } = await import("./route");
+    const res = await GET(
+      new Request("http://localhost/api/ai/chat/export?mindmapId=m1&scope=global"),
+    );
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as unknown;
+    expect(json).toMatchObject({
+      ok: true,
+      version: "v1",
+      mindmapId: "m1",
+      messages: [
+        {
+          id: "msg1",
+          role: "assistant",
+          metadata: {
+            constraints: {
+              outputLanguage: "zh",
+              branchCount: 4,
+              depth: 2,
+              allowMove: true,
+              allowDelete: false,
+            },
+            changeSummary: { added: 1 },
+          },
+        },
+      ],
+    });
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual([
+      "mma_check_quota",
+      "mma_consume_quota",
+    ]);
+  });
+
+  test("exports successfully when metadata column is missing (fallback select)", async () => {
+    const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase);
+    mockConsumeQuota(supabase);
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: { id: "m1" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_threads.select", async () => ({
+      data: { id: "t1", scope: "global", node_id: null, created_at: "2026-02-08T00:00:00.000Z" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_messages.select", async (ctx) => {
+      if (ctx.select && ctx.select.includes("metadata")) {
+        return {
+          data: null,
+          error: { code: "PGRST204", message: "could not find the 'metadata' column" },
+        };
+      }
+      return {
+        data: [
+          {
+            id: "msg1",
+            role: "user",
+            content: "hi",
+            operations: null,
+            provider: null,
+            model: null,
+            created_at: "2026-02-08T00:00:01.000Z",
+          },
+        ],
+        error: null,
+      };
+    });
+    mocks.state.supabase = supabase;
+
+    const { GET } = await import("./route");
+    const res = await GET(
+      new Request("http://localhost/api/ai/chat/export?mindmapId=m1&scope=global"),
+    );
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as unknown;
+    expect(json).toMatchObject({
+      ok: true,
+      version: "v1",
+      mindmapId: "m1",
+      messages: [{ id: "msg1", role: "user", content: "hi" }],
+    });
+
+    const messageSelects = supabase.__calls.queries.filter(
+      (q) => q.table === "chat_messages" && q.operation === "select",
+    );
+    expect(messageSelects).toHaveLength(2);
+    expect(messageSelects[0]?.select).toContain("metadata");
+    expect(messageSelects[1]?.select).not.toContain("metadata");
+
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual([
+      "mma_check_quota",
+      "mma_consume_quota",
+    ]);
+  });
+
   test("returns 429 when over quota", async () => {
     const supabase = createSupabaseMock({ userId: "u1" });
     mockCheckQuota(supabase, { ok: false, used: 50, limit: 50 });

@@ -95,6 +95,7 @@ export const AiChatPersistedMessageSchema = z
     operations: z.array(OperationSchema).nullable(),
     provider: z.string().nullable(),
     model: z.string().nullable(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
     createdAt: z.string(),
   })
   .strict()

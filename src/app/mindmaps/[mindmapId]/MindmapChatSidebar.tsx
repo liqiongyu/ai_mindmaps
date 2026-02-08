@@ -409,6 +409,7 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
                 operations?: Operation[] | null;
                 provider?: string | null;
                 model?: string | null;
+                metadata?: unknown;
                 createdAt?: string;
               }>;
             }
@@ -435,6 +436,13 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
                 content: m.content,
                 operations:
                   m.role === "assistant" && Array.isArray(m.operations) ? m.operations : null,
+                constraints:
+                  m.role === "assistant" &&
+                  m.metadata &&
+                  typeof m.metadata === "object" &&
+                  isAiChatConstraints((m.metadata as Record<string, unknown>).constraints)
+                    ? ((m.metadata as Record<string, unknown>).constraints as AiChatConstraints)
+                    : undefined,
                 provider: m.provider ?? null,
                 model: m.model ?? null,
                 createdAt: m.createdAt,
