@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  AiChatExportRequestSchema,
+  AiChatExportResponseSchema,
   AiChatHistoryRequestSchema,
   AiChatPersistedMessageSchema,
   AiChatRequestSchema,
@@ -67,6 +69,56 @@ describe("ai/chat schemas", () => {
         },
       }).success,
     ).toBe(false);
+  });
+
+  test("AiChatExportRequestSchema matches history query shape", () => {
+    expect(AiChatExportRequestSchema.safeParse({ mindmapId: "m1", scope: "global" }).success).toBe(
+      true,
+    );
+
+    expect(AiChatExportRequestSchema.safeParse({ mindmapId: "m1", scope: "node" }).success).toBe(
+      false,
+    );
+
+    expect(
+      AiChatExportRequestSchema.safeParse({ mindmapId: "m1", scope: "node", selectedNodeId: "n1" })
+        .success,
+    ).toBe(true);
+  });
+
+  test("AiChatExportResponseSchema accepts v1 payload", () => {
+    const now = new Date().toISOString();
+    const op = { type: "rename_node", nodeId: "n1", text: "Renamed" } as const;
+
+    expect(
+      AiChatExportResponseSchema.safeParse({
+        ok: true,
+        version: "v1",
+        exportedAt: now,
+        mindmapId: "m1",
+        thread: { id: "t1", scope: "global", nodeId: null, createdAt: now },
+        messages: [
+          {
+            id: "msg1",
+            role: "user",
+            content: "Hello",
+            operations: null,
+            provider: null,
+            model: null,
+            createdAt: now,
+          },
+          {
+            id: "msg2",
+            role: "assistant",
+            content: "OK",
+            operations: [op],
+            provider: "azure-openai",
+            model: "gpt-5-mini",
+            createdAt: now,
+          },
+        ],
+      }).success,
+    ).toBe(true);
   });
 
   test("AiChatRequestSchema accepts dryRun and providedOutput", () => {

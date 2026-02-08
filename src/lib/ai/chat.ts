@@ -126,3 +126,19 @@ export const AiChatHistoryResponseSchema = z
   .strict();
 
 export type AiChatHistoryResponse = z.infer<typeof AiChatHistoryResponseSchema>;
+
+export const AiChatExportRequestSchema = AiChatHistoryRequestSchema;
+export type AiChatExportRequest = z.infer<typeof AiChatExportRequestSchema>;
+
+export const AiChatExportResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    version: z.literal("v1"),
+    exportedAt: z.string(),
+    mindmapId: z.string(),
+    thread: AiChatThreadSchema,
+    messages: z.array(AiChatPersistedMessageSchema),
+  })
+  .strict();
+
+export type AiChatExportResponse = z.infer<typeof AiChatExportResponseSchema>;

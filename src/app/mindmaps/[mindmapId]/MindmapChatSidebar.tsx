@@ -7,6 +7,7 @@ import {
   DEFAULT_AI_CHAT_CONSTRAINTS,
   formatAiChatConstraintsSummary,
 } from "@/lib/ai/chatConstraints";
+import { buildAiChatAuditExportFilename } from "@/lib/ai/chatExport";
 import { formatAiChatActionableErrorMessage, parseAiChatErrorInfo } from "@/lib/ai/chatErrors";
 import type { Operation } from "@/lib/mindmap/ops";
 import { summarizeOperations } from "@/lib/mindmap/operationSummary";
@@ -139,6 +140,7 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
   const [selectedPresetId, setSelectedPresetId] = useState<string>("default");
   const [presetNameDraft, setPresetNameDraft] = useState("");
   const [presetSaving, setPresetSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedOpsKey, setCopiedOpsKey] = useState<string | null>(null);
@@ -460,6 +462,87 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
     return input.trim().length > 0 && !sending && historyAttempted;
   }, [historyAttempted, input, nodeModeBlocked, sending]);
 
+  const exportAudit = useCallback(async () => {
+    if (scope === "node" && !selectedNodeId) {
+      uiFeedback.enqueue({
+        type: "info",
+        title: "无法导出",
+        message: "请选择一个节点以启用节点模式后再导出。",
+      });
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({
+        mindmapId,
+        scope,
+      });
+      if (scope === "node" && selectedNodeId) {
+        params.set("selectedNodeId", selectedNodeId);
+      }
+
+      const res = await fetch(`/api/ai/chat/export?${params.toString()}`);
+      const json = (await res.json().catch(() => null)) as unknown;
+
+      const isOk =
+        res.ok && json && typeof json === "object" && (json as { ok?: unknown }).ok === true;
+
+      if (!isOk) {
+        const record = json && typeof json === "object" ? (json as Record<string, unknown>) : null;
+        const code = record && typeof record.code === "string" ? record.code : null;
+        const serverMessage = record && typeof record.message === "string" ? record.message : null;
+
+        const message =
+          code === "chat_persistence_unavailable"
+            ? "聊天记录未持久化，无法导出。"
+            : code === "CHAT_THREAD_NOT_FOUND"
+              ? "当前会话暂无可导出的聊天记录。"
+              : (serverMessage ?? `导出失败（${res.status}）`);
+
+        uiFeedback.enqueue({
+          type: "error",
+          title: "导出失败",
+          message,
+        });
+        return;
+      }
+
+      const exportPayload = json as { exportedAt?: string };
+      const filename = buildAiChatAuditExportFilename({
+        mindmapId,
+        scope,
+        selectedNodeId: scope === "node" ? selectedNodeId : null,
+        exportedAt: exportPayload.exportedAt,
+      });
+
+      const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      uiFeedback.enqueue({
+        type: "success",
+        title: "已导出审计记录",
+        message: "审计记录已导出。",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "导出失败";
+      uiFeedback.enqueue({
+        type: "error",
+        title: "导出失败",
+        message,
+      });
+    } finally {
+      setExporting(false);
+    }
+  }, [mindmapId, scope, selectedNodeId]);
+
   const onApplyChip = useCallback((template: string) => {
     setInput((prev) => {
       const base = prev.trimEnd();
@@ -755,6 +838,14 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
                 关闭
               </button>
             ) : null}
+            <button
+              className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+              disabled={exporting || nodeModeBlocked || !historyAttempted}
+              onClick={() => void exportAudit()}
+              type="button"
+            >
+              {exporting ? "导出中…" : "导出"}
+            </button>
             <div className="inline-flex overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800">
               <button
                 className={`px-2 py-1 text-xs ${
