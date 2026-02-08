@@ -55,6 +55,7 @@ type MindmapChatSidebarBaseProps = {
   mindmapId: string;
   selectedNodeId: string | null;
   selectedNodeLabel: string;
+  chatPersistenceAvailable?: boolean;
   onApplyOperations: (
     operations: Operation[],
   ) => { ok: true; rollbackToPresentId?: number } | { ok: false; message: string };
@@ -81,6 +82,7 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
   const drawerMode = props.mode === "drawer";
   const drawerOpen = props.mode === "drawer" ? props.open : false;
   const onDrawerOpenChange = props.mode === "drawer" ? props.onOpenChange : null;
+  const chatPersistenceAvailable = props.chatPersistenceAvailable ?? true;
 
   const [scope, setScope] = useState<ChatScope>("global");
   const [messagesByThreadKey, setMessagesByThreadKey] = useState<Record<string, ChatMessage[]>>({});
@@ -245,6 +247,7 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
             operations: Operation[];
             provider?: string | null;
             model?: string | null;
+            persistence?: { chatPersisted?: boolean };
           }
         | { ok: false; message?: string }
         | null;
@@ -268,7 +271,15 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
         uiFeedback.enqueue({
           type: "success",
           title: "AI 已应用改动",
-          message: `变更摘要：新增 ${summary.add} · 改名 ${summary.rename} · 移动 ${move} · 删除 ${summary.delete}`,
+          message: `变更摘要：新增 ${summary.add} · 改名 ${summary.rename} · 移动 ${move} · 删除 ${summary.delete}。改动已应用到画布，正在保存到云端…`,
+        });
+      }
+
+      if (json.persistence && json.persistence.chatPersisted === false) {
+        uiFeedback.enqueue({
+          type: "warning",
+          title: "聊天记录未持久化",
+          message: "聊天记录暂未持久化，刷新后可能丢失。",
         });
       }
 
@@ -388,6 +399,11 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
             <>请选择一个节点以启用节点模式。</>
           )}
         </div>
+        {!chatPersistenceAvailable ? (
+          <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+            聊天记录暂未持久化，刷新后可能丢失。
+          </div>
+        ) : null}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">

@@ -106,7 +106,9 @@ export function MindmapEditor(props: MindmapEditorProps) {
     return "loading";
   });
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [persistedSavePaused, setPersistedSavePaused] = useState(false);
   const [uiSaveError, setUiSaveError] = useState<string | null>(null);
+  const [persistence, setPersistence] = useState<{ chat: boolean; uiState: boolean } | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [stoppingShare, setStoppingShare] = useState(false);
@@ -148,6 +150,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const skipNextSaveRef = useRef(false);
   const persistedSaveInFlightRef = useRef(false);
   const persistedSaveQueuedBodyRef = useRef<string | null>(null);
+  const persistedSavePausedRef = useRef(false);
   const uiSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const uiSaveSeqRef = useRef(0);
   const skipNextUiSaveRef = useRef(false);
@@ -307,7 +310,9 @@ export function MindmapEditor(props: MindmapEditorProps) {
     let cancelled = false;
     setLoadError(null);
     setSaveError(null);
+    setPersistedSavePaused(false);
     setUiSaveError(null);
+    setPersistence(null);
     setShareUrl(null);
     setShareError(null);
     setDeletingMindmap(false);
@@ -330,6 +335,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     pendingSaveRef.current = false;
     persistedSaveInFlightRef.current = false;
     persistedSaveQueuedBodyRef.current = null;
+    persistedSavePausedRef.current = false;
     pendingUiSaveRef.current = false;
     uiStateJsonRef.current = null;
     setSelectedNodeId(null);
@@ -343,6 +349,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
               state: unknown;
               ui?: unknown;
               mindmap?: { isPublic?: boolean; publicSlug?: string | null };
+              persistence?: { chat?: boolean; uiState?: boolean };
             }
           | { ok: false; message?: string }
           | null;
@@ -359,6 +366,11 @@ export function MindmapEditor(props: MindmapEditorProps) {
         }
 
         if (cancelled) return;
+        const nextPersistence = {
+          chat: typeof json.persistence?.chat === "boolean" ? json.persistence.chat : true,
+          uiState: typeof json.persistence?.uiState === "boolean" ? json.persistence.uiState : true,
+        };
+        setPersistence(nextPersistence);
         const isPublic = Boolean(json.mindmap?.isPublic);
         const publicSlug =
           typeof json.mindmap?.publicSlug === "string" ? json.mindmap.publicSlug : null;
@@ -402,6 +414,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   useEffect(() => {
     if (!persistedMindmapId) return;
     if (loadError) return;
+    if (persistence && !persistence.uiState) return;
     if (!stateRef.current) return;
 
     if (skipNextUiSaveRef.current) {
@@ -464,11 +477,12 @@ export function MindmapEditor(props: MindmapEditorProps) {
     return () => {
       if (uiSaveTimerRef.current) clearTimeout(uiSaveTimerRef.current);
     };
-  }, [collapsedNodeIds, loadError, persistedMindmapId, selectedNodeId, viewport]);
+  }, [collapsedNodeIds, loadError, persistedMindmapId, persistence, selectedNodeId, viewport]);
 
   const flushPersistedSave = useCallback(async () => {
     if (!persistedMindmapId) return;
     if (persistedSaveInFlightRef.current) return;
+    if (persistedSavePausedRef.current) return;
     const body = persistedSaveQueuedBodyRef.current;
     if (!body) return;
 
@@ -493,23 +507,62 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
       if (saveSeqRef.current === requestId && !persistedSaveQueuedBodyRef.current) {
         pendingSaveRef.current = false;
+        persistedSavePausedRef.current = false;
+        setPersistedSavePaused(false);
         setSaveStatus("saved");
         setSaveError(null);
       }
     } catch (err) {
-      if (saveSeqRef.current === requestId && !persistedSaveQueuedBodyRef.current) {
-        pendingSaveRef.current = false;
+      if (saveSeqRef.current === requestId) {
+        if (!persistedSaveQueuedBodyRef.current) {
+          persistedSaveQueuedBodyRef.current = body;
+        }
+        pendingSaveRef.current = true;
+        persistedSavePausedRef.current = true;
+        setPersistedSavePaused(true);
         const message = err instanceof Error ? err.message : "保存失败";
         setSaveStatus("error");
         setSaveError(message);
       }
     } finally {
       persistedSaveInFlightRef.current = false;
-      if (persistedSaveQueuedBodyRef.current) {
+      if (persistedSaveQueuedBodyRef.current && !persistedSavePausedRef.current) {
         void flushPersistedSave();
       }
     }
   }, [persistedMindmapId]);
+
+  const onRetryPersistedSave = useCallback(() => {
+    if (!persistedMindmapId) return;
+    const current = stateRef.current;
+    if (!current) return;
+
+    persistedSavePausedRef.current = false;
+    setPersistedSavePaused(false);
+    setSaveStatus("saving");
+    setSaveError(null);
+    pendingSaveRef.current = true;
+    persistedSaveQueuedBodyRef.current = JSON.stringify({ state: current });
+    void flushPersistedSave();
+  }, [flushPersistedSave, persistedMindmapId]);
+
+  const onCopyPersistedSaveError = useCallback(async () => {
+    if (!saveError) return;
+    try {
+      await navigator.clipboard.writeText(saveError);
+      uiFeedback.enqueue({
+        type: "success",
+        title: "已复制",
+        message: "错误信息已复制到剪贴板。",
+      });
+    } catch {
+      uiFeedback.enqueue({
+        type: "error",
+        title: "复制失败",
+        message: "无法写入剪贴板，请手动复制。",
+      });
+    }
+  }, [saveError]);
 
   useEffect(() => {
     if (!persistedMindmapId) return;
@@ -525,12 +578,15 @@ export function MindmapEditor(props: MindmapEditorProps) {
       clearTimeout(saveTimerRef.current);
     }
 
-    setSaveStatus("saving");
-    setSaveError(null);
     pendingSaveRef.current = true;
+    if (!persistedSavePausedRef.current) {
+      setSaveStatus("saving");
+      setSaveError(null);
+    }
 
     saveTimerRef.current = setTimeout(async () => {
       persistedSaveQueuedBodyRef.current = JSON.stringify({ state });
+      if (persistedSavePausedRef.current) return;
       void flushPersistedSave();
     }, 500);
 
@@ -541,6 +597,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
   useEffect(() => {
     if (!persistedMindmapId) return;
+    if (persistence && !persistence.uiState) return;
 
     const flush = () => {
       if (!pendingUiSaveRef.current) return;
@@ -575,7 +632,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
       window.removeEventListener("pagehide", flush);
       flush();
     };
-  }, [persistedMindmapId]);
+  }, [persistedMindmapId, persistence]);
 
   useEffect(() => {
     if (props.mode !== "try") return;
@@ -637,6 +694,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     if (!persistedMindmapId) return;
 
     const flush = () => {
+      if (persistedSavePausedRef.current) return;
       if (!pendingSaveRef.current) return;
       const current = stateRef.current;
       if (!current) return;
@@ -1847,12 +1905,46 @@ export function MindmapEditor(props: MindmapEditorProps) {
                 </div>
               </div>
             ) : null}
+            {persistedMindmapId && persistence && !persistence.uiState ? (
+              <div
+                className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-amber-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-amber-200"
+                role="status"
+              >
+                视图状态暂未持久化，仅本次会话有效。
+              </div>
+            ) : null}
             {saveError ? (
               <div
                 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200"
                 role="alert"
               >
-                保存失败：{saveError}
+                {persistedMindmapId ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      保存失败：{saveError}（未完成云端持久化）
+                      {persistedSavePaused ? "。已暂停自动重试。" : null}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:bg-zinc-950 dark:text-red-200 dark:hover:bg-red-950/30"
+                        disabled={!persistedSavePaused}
+                        onClick={onRetryPersistedSave}
+                        type="button"
+                      >
+                        重试
+                      </button>
+                      <button
+                        className="rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:bg-zinc-950 dark:text-red-200 dark:hover:bg-red-950/30"
+                        onClick={onCopyPersistedSaveError}
+                        type="button"
+                      >
+                        复制错误信息
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>保存失败：{saveError}</>
+                )}
               </div>
             ) : null}
             {uiSaveError ? (
@@ -1903,6 +1995,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
           </div>
           {persistedMindmapId ? (
             <MindmapChatSidebar
+              chatPersistenceAvailable={persistence?.chat ?? true}
               mode="drawer"
               mindmapId={persistedMindmapId}
               onOpenChange={setChatDrawerOpen}

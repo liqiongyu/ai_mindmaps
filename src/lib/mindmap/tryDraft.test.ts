@@ -60,6 +60,40 @@ describe("tryDraft", () => {
     expect(parsed?.ui.viewport).toEqual({ x: 1, y: 2, zoom: 0.9 });
   });
 
+  test("migrates legacy (non-UUID) draft state ids to UUIDs", () => {
+    const legacyDraft = {
+      state: {
+        rootNodeId: "root",
+        nodesById: {
+          root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
+          child: { id: "child", parentId: "root", text: "Child", notes: null, orderIndex: 0 },
+        },
+      },
+      updatedAt: new Date().toISOString(),
+      ui: {
+        collapsedNodeIds: ["child"],
+        selectedNodeId: "child",
+        viewport: null,
+      },
+    };
+
+    const parsed = parseTryDraftJson(JSON.stringify(legacyDraft));
+    expect(parsed).not.toBeNull();
+    if (!parsed) return;
+
+    expect(parsed.state.rootNodeId).not.toBe("root");
+    expect(Object.keys(parsed.state.nodesById).length).toBe(2);
+
+    const root = parsed.state.nodesById[parsed.state.rootNodeId];
+    expect(root).toBeTruthy();
+    expect(root.parentId).toBeNull();
+
+    const child = Object.values(parsed.state.nodesById).find((n) => n.text === "Child");
+    expect(child).toBeTruthy();
+    expect(child?.parentId).toBe(parsed.state.rootNodeId);
+    expect(parsed.ui.selectedNodeId).toBe(child?.id);
+  });
+
   test("returns null for invalid JSON", () => {
     expect(parseTryDraftJson("{not-json")).toBeNull();
   });

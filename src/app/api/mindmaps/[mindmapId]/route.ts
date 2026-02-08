@@ -15,6 +15,11 @@ function isMissingUiStateSchema(error: { code?: string; message: string }): bool
   return /could not find the table/i.test(error.message);
 }
 
+function isMissingChatPersistenceSchema(error: { code?: string; message: string }): boolean {
+  if (error.code === "PGRST205") return true;
+  return /could not find the table/i.test(error.message);
+}
+
 const MindmapUiStateRowSchema = z.object({
   collapsed_node_ids: z.array(z.string()).nullable(),
   selected_node_id: z.string().nullable(),
@@ -59,6 +64,26 @@ export async function GET(
   const state = nodeRowsToMindmapState(mindmap.root_node_id, nodes ?? []);
   const nodeIds = new Set((nodes ?? []).map((node) => node.id));
 
+  const persistence = {
+    chat: true,
+    uiState: true,
+  };
+
+  const { error: chatSchemaError } = await supabase
+    .from("chat_threads")
+    .select("id")
+    .eq("mindmap_id", mindmapId)
+    .limit(1);
+
+  if (chatSchemaError) {
+    if (isMissingChatPersistenceSchema(chatSchemaError)) {
+      persistence.chat = false;
+    } else {
+      console.error("Failed to check chat persistence", { mindmapId, error: chatSchemaError });
+      persistence.chat = false;
+    }
+  }
+
   let ui: {
     collapsedNodeIds: string[];
     selectedNodeId: string | null;
@@ -75,6 +100,7 @@ export async function GET(
     if (!isMissingUiStateSchema(uiError)) {
       return jsonError(500, "Failed to load mindmap UI state", { detail: uiError.message });
     }
+    persistence.uiState = false;
   } else {
     const uiRow = MindmapUiStateRowSchema.safeParse(uiRowRaw);
     if (uiRow.success && uiRow.data) {
@@ -106,6 +132,7 @@ export async function GET(
     },
     ui,
     state,
+    persistence,
   });
 }
 

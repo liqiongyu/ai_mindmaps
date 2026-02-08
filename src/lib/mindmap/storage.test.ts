@@ -34,18 +34,21 @@ describe("mindmap storage", () => {
   });
 
   test("MindmapStateSchema rejects missing root node", () => {
+    const rootNodeId = "00000000-0000-4000-8000-0000000000ff";
     const result = MindmapStateSchema.safeParse({
-      rootNodeId: "missing",
+      rootNodeId,
       nodesById: {},
     });
     expect(result.success).toBe(false);
   });
 
   test("MindmapStateSchema rejects root node with non-null parentId", () => {
+    const rootNodeId = "00000000-0000-4000-8000-000000000011";
+    const parentId = "00000000-0000-4000-8000-000000000012";
     const state = {
-      rootNodeId: "root",
+      rootNodeId,
       nodesById: {
-        root: { id: "root", parentId: "x", text: "Root", notes: null, orderIndex: 0 },
+        [rootNodeId]: { id: rootNodeId, parentId, text: "Root", notes: null, orderIndex: 0 },
       },
     };
 
@@ -54,31 +57,43 @@ describe("mindmap storage", () => {
   });
 
   test("MindmapStateSchema rejects non-root node with null parentId", () => {
+    const rootNodeId = "00000000-0000-4000-8000-000000000021";
+    const otherId = "00000000-0000-4000-8000-000000000022";
     const result = MindmapStateSchema.safeParse({
-      rootNodeId: "root",
+      rootNodeId,
       nodesById: {
-        root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
-        other: { id: "other", parentId: null, text: "Other", notes: null, orderIndex: 0 },
+        [rootNodeId]: { id: rootNodeId, parentId: null, text: "Root", notes: null, orderIndex: 0 },
+        [otherId]: { id: otherId, parentId: null, text: "Other", notes: null, orderIndex: 0 },
       },
     });
     expect(result.success).toBe(false);
   });
 
   test("MindmapStateSchema rejects node with missing parentId reference", () => {
+    const rootNodeId = "00000000-0000-4000-8000-000000000031";
+    const childId = "00000000-0000-4000-8000-000000000032";
+    const missingParentId = "00000000-0000-4000-8000-000000000033";
     const result = MindmapStateSchema.safeParse({
-      rootNodeId: "root",
+      rootNodeId,
       nodesById: {
-        root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
-        child: { id: "child", parentId: "missing", text: "Child", notes: null, orderIndex: 0 },
+        [rootNodeId]: { id: rootNodeId, parentId: null, text: "Root", notes: null, orderIndex: 0 },
+        [childId]: {
+          id: childId,
+          parentId: missingParentId,
+          text: "Child",
+          notes: null,
+          orderIndex: 0,
+        },
       },
     });
     expect(result.success).toBe(false);
   });
 
   test("nodeRowsToMindmapState maps persisted positions", () => {
-    const restored = nodeRowsToMindmapState("root", [
+    const rootNodeId = "00000000-0000-4000-8000-000000000041";
+    const restored = nodeRowsToMindmapState(rootNodeId, [
       {
-        id: "root",
+        id: rootNodeId,
         parent_id: null,
         text: "Root",
         notes: null,
@@ -88,7 +103,7 @@ describe("mindmap storage", () => {
       },
     ]);
 
-    expect(restored.nodesById.root.posX).toBe(12.5);
-    expect(restored.nodesById.root.posY).toBe(34.25);
+    expect(restored.nodesById[rootNodeId].posX).toBe(12.5);
+    expect(restored.nodesById[rootNodeId].posY).toBe(34.25);
   });
 });

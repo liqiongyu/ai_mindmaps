@@ -507,6 +507,7 @@ export async function POST(request: Request) {
   const nodeId = scope === "node" ? (selectedNodeId ?? null) : null;
   const threadIdResult = await getOrCreateThreadId({ supabase, mindmapId, scope, nodeId });
 
+  let chatPersisted = false;
   if (threadIdResult.ok) {
     const { error: insertError } = await supabase.from("chat_messages").insert([
       {
@@ -527,7 +528,9 @@ export async function POST(request: Request) {
       },
     ]);
 
-    if (insertError && !isMissingChatPersistenceSchema(insertError)) {
+    if (!insertError) {
+      chatPersisted = true;
+    } else if (!isMissingChatPersistenceSchema(insertError)) {
       return jsonError(500, "Failed to persist chat messages", { detail: insertError.message });
     }
   } else if (!threadIdResult.missingSchema) {
@@ -540,5 +543,6 @@ export async function POST(request: Request) {
     operations: modelOutput.operations,
     provider,
     model: modelName || null,
+    persistence: { chatPersisted },
   });
 }

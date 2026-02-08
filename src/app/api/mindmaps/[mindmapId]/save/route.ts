@@ -13,11 +13,6 @@ function isMissingAtomicSaveRpc(error: { code?: string; message: string }): bool
   return /could not find the function/i.test(error.message);
 }
 
-function isMindmapParentFkViolation(error: { code?: string; message: string }): boolean {
-  if (error.code === "23503") return true;
-  return /mindmap_nodes_parent_id_fkey/i.test(error.message);
-}
-
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ mindmapId: string }> },
@@ -57,7 +52,7 @@ export async function POST(
   }
 
   if (parsed.data.state.rootNodeId !== mindmap.root_node_id) {
-    return jsonError(400, "rootNodeId mismatch");
+    return jsonError(400, "rootNodeId mismatch", { code: "ROOT_NODE_MISMATCH" });
   }
 
   const inferredTitle =
@@ -86,43 +81,14 @@ export async function POST(
     return NextResponse.json({ ok: true });
   }
 
-  const canFallback = isMissingAtomicSaveRpc(rpcError) || isMindmapParentFkViolation(rpcError);
-  if (!canFallback) {
-    return jsonError(500, "Failed to save mindmap nodes", { detail: rpcError.message });
-  }
-
-  // Fallback path for older schema or FK ordering conflicts in RPC execution.
-  const { error: updateError } = await supabase
-    .from("mindmaps")
-    .update({ title: inferredTitle })
-    .eq("id", mindmapId)
-    .eq("owner_id", data.user.id);
-
-  if (updateError) {
-    return jsonError(500, "Failed to update mindmap", { detail: updateError.message });
-  }
-
-  for (const row of rows) {
-    const { error: upsertError } = await supabase.from("mindmap_nodes").upsert([row], {
-      onConflict: "id",
+  if (isMissingAtomicSaveRpc(rpcError)) {
+    return jsonError(503, "保存能力不可用：原子保存 RPC 缺失。请先应用 Supabase migrations。", {
+      code: "PERSISTENCE_UNAVAILABLE",
     });
-
-    if (upsertError) {
-      return jsonError(500, "Failed to save mindmap nodes", { detail: upsertError.message });
-    }
   }
 
-  const ids = rows.map((r) => r.id);
-  const inList = `(${ids.map((id) => `"${id}"`).join(",")})`;
-  const { error: cleanupError } = await supabase
-    .from("mindmap_nodes")
-    .delete()
-    .eq("mindmap_id", mindmapId)
-    .not("id", "in", inList);
-
-  if (cleanupError) {
-    return jsonError(500, "Failed to save mindmap nodes", { detail: cleanupError.message });
-  }
-
-  return NextResponse.json({ ok: true });
+  return jsonError(500, "Failed to save mindmap nodes", {
+    code: "SAVE_FAILED",
+    detail: rpcError.message,
+  });
 }
