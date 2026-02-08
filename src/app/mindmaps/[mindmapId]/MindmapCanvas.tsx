@@ -41,6 +41,7 @@ type MindmapCanvasNodeData = {
   label: string;
   isEditing: boolean;
   highlight?: OperationHighlightKind | null;
+  onSelectNodeId?: (nodeId: string) => void;
   onRequestEditNodeId?: (nodeId: string) => void;
   onCommitNodeTitle?: (args: { nodeId: string; title: string }) => { ok: true } | { ok: false };
   onCancelEditNodeId?: (nodeId: string) => void;
@@ -151,6 +152,9 @@ const MindmapNode = memo(function MindmapNode({
         event.stopPropagation();
         data.onRequestEditNodeId?.(id);
       }}
+      onFocus={() => data.onSelectNodeId?.(id)}
+      role="button"
+      tabIndex={0}
     >
       {data.label}
     </div>
@@ -206,6 +210,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
           label: node.data.label,
           isEditing: node.id === editingNodeId,
           highlight: highlightByNodeId?.[node.id] ?? null,
+          onSelectNodeId,
           onRequestEditNodeId,
           onCommitNodeTitle,
           onCancelEditNodeId,
@@ -221,6 +226,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     highlightByNodeId,
     onCancelEditNodeId,
     onCommitNodeTitle,
+    onSelectNodeId,
     onRequestEditNodeId,
     selectedNodeId,
     state,

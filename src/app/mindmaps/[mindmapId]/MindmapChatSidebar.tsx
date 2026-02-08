@@ -50,13 +50,7 @@ function getThreadKey(scope: ChatScope, selectedNodeId: string | null): string |
   return `node:${selectedNodeId}`;
 }
 
-export function MindmapChatSidebar({
-  mindmapId,
-  selectedNodeId,
-  selectedNodeLabel,
-  onApplyOperations,
-  onRollbackToPresentId,
-}: {
+type MindmapChatSidebarBaseProps = {
   mindmapId: string;
   selectedNodeId: string | null;
   selectedNodeLabel: string;
@@ -66,7 +60,27 @@ export function MindmapChatSidebar({
   onRollbackToPresentId?: (
     targetPresentId: number,
   ) => { ok: true } | { ok: false; message: string };
-}) {
+};
+
+type MindmapChatSidebarDesktopProps = MindmapChatSidebarBaseProps & {
+  mode?: "desktop";
+};
+
+type MindmapChatSidebarDrawerProps = MindmapChatSidebarBaseProps & {
+  mode: "drawer";
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+};
+
+type MindmapChatSidebarProps = MindmapChatSidebarDesktopProps | MindmapChatSidebarDrawerProps;
+
+export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
+  const { mindmapId, selectedNodeId, selectedNodeLabel, onApplyOperations, onRollbackToPresentId } =
+    props;
+  const drawerMode = props.mode === "drawer";
+  const drawerOpen = props.mode === "drawer" ? props.open : false;
+  const onDrawerOpenChange = props.mode === "drawer" ? props.onOpenChange : null;
+
   const [scope, setScope] = useState<ChatScope>("global");
   const [messagesByThreadKey, setMessagesByThreadKey] = useState<Record<string, ChatMessage[]>>({});
   const [attemptedLoadByThreadKey, setAttemptedLoadByThreadKey] = useState<Record<string, boolean>>(
@@ -269,34 +283,69 @@ export function MindmapChatSidebar({
     }
   }, [constraints, input, mindmapId, onApplyOperations, scope, selectedNodeId]);
 
-  return (
-    <aside className="flex w-96 shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+  useEffect(() => {
+    if (!drawerMode) return;
+    if (!drawerOpen) return;
+    if (!onDrawerOpenChange) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onDrawerOpenChange(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [drawerMode, drawerOpen, onDrawerOpenChange]);
+
+  const sidebar = (
+    <aside
+      id="mindmap-ai-panel"
+      className={
+        drawerMode
+          ? drawerOpen
+            ? "fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] w-full shrink-0 flex-col rounded-t-xl border border-zinc-200 bg-white shadow-lg lg:static lg:z-auto lg:max-h-none lg:w-96 lg:rounded-none lg:border-t-0 lg:border-r-0 lg:border-b-0 lg:border-l lg:shadow-none dark:border-zinc-800 dark:bg-zinc-950"
+            : "hidden w-96 shrink-0 flex-col border-l border-zinc-200 bg-white lg:flex dark:border-zinc-800 dark:bg-zinc-950"
+          : "flex w-96 shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+      }
+    >
       <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-medium">AI</div>
-          <div className="inline-flex overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800">
-            <button
-              className={`px-2 py-1 text-xs ${
-                scope === "global"
-                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "bg-transparent text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
-              }`}
-              onClick={() => setScope("global")}
-              type="button"
-            >
-              全局
-            </button>
-            <button
-              className={`px-2 py-1 text-xs ${
-                scope === "node"
-                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "bg-transparent text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
-              }`}
-              onClick={() => setScope("node")}
-              type="button"
-            >
-              节点
-            </button>
+          <div className="flex items-center gap-2">
+            {drawerMode && drawerOpen && onDrawerOpenChange ? (
+              <button
+                className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs hover:bg-zinc-50 lg:hidden dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+                onClick={() => onDrawerOpenChange(false)}
+                type="button"
+              >
+                关闭
+              </button>
+            ) : null}
+            <div className="inline-flex overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800">
+              <button
+                className={`px-2 py-1 text-xs ${
+                  scope === "global"
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "bg-transparent text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                }`}
+                onClick={() => setScope("global")}
+                type="button"
+              >
+                全局
+              </button>
+              <button
+                className={`px-2 py-1 text-xs ${
+                  scope === "node"
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "bg-transparent text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                }`}
+                onClick={() => setScope("node")}
+                type="button"
+              >
+                节点
+              </button>
+            </div>
           </div>
         </div>
         <div className="mt-1 text-xs text-zinc-500">
@@ -600,5 +649,24 @@ export function MindmapChatSidebar({
         </div>
       </div>
     </aside>
+  );
+
+  if (!drawerMode) {
+    return sidebar;
+  }
+
+  if (!onDrawerOpenChange) return null;
+
+  return (
+    <>
+      {drawerOpen ? (
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+          onClick={() => onDrawerOpenChange(false)}
+        />
+      ) : null}
+      {sidebar}
+    </>
   );
 }
