@@ -82,7 +82,7 @@ export function TryDraftImportModal({
 
           {error ? (
             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200">
-              导入失败：{error}
+              操作失败：{error}
             </div>
           ) : null}
 

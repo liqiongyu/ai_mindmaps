@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
   const { state: remappedDraft, idMap } = remapMindmapStateIds(parsed.data.draft);
   const root = remappedDraft.nodesById[remappedDraft.rootNodeId];
-  const title = root?.text?.trim() || "Untitled";
+  const title = root?.text?.trim().slice(0, 120) || "Untitled";
 
   const mindmapId = crypto.randomUUID();
 
