@@ -11,38 +11,28 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
   const { slug } = await params;
   const supabase = await createSupabaseServerClient();
 
-  const { data: mindmap, error: mindmapError } = await supabase
-    .from("mindmaps")
-    .select("id,title,root_node_id,updated_at")
-    .eq("public_slug", slug)
-    .eq("is_public", true)
-    .maybeSingle();
+  const { data: rows, error } = await supabase.rpc("mma_get_public_mindmap_snapshot", {
+    p_slug: slug,
+  });
 
-  if (mindmapError) {
-    return jsonError(500, "Failed to load public mindmap", { detail: mindmapError.message });
+  if (error) {
+    return jsonError(500, "Failed to load public mindmap", { detail: error.message });
   }
-  if (!mindmap) {
+
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) {
     return jsonError(404, "Mindmap not found");
   }
 
-  const { data: nodes, error: nodesError } = await supabase
-    .from("mindmap_nodes")
-    .select("id,parent_id,text,notes,order_index,pos_x,pos_y")
-    .eq("mindmap_id", mindmap.id);
-
-  if (nodesError) {
-    return jsonError(500, "Failed to load mindmap nodes", { detail: nodesError.message });
-  }
-
-  const state = nodeRowsToMindmapState(mindmap.root_node_id, nodes ?? []);
+  const nodes = Array.isArray(row.nodes) ? row.nodes : [];
+  const state = nodeRowsToMindmapState(row.root_node_id, nodes);
 
   return NextResponse.json({
     ok: true,
     mindmap: {
-      id: mindmap.id,
-      title: mindmap.title,
-      rootNodeId: mindmap.root_node_id,
-      updatedAt: mindmap.updated_at,
+      title: row.title,
+      rootNodeId: row.root_node_id,
+      updatedAt: row.updated_at,
     },
     state,
   });
