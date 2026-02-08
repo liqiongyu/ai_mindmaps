@@ -37,6 +37,11 @@ export function normalizeAiMindmapOperationIds(args: {
     }
     seenAddNodeIds.add(op.nodeId);
 
+    if (isUuid(op.nodeId)) {
+      usedIds.add(op.nodeId);
+      continue;
+    }
+
     idMap.set(op.nodeId, generateUniqueUuid(usedIds));
   }
 

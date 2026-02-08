@@ -21,6 +21,16 @@ export const AiChatRequestSchema = z
     selectedNodeId: z.string().min(1).optional(),
     userMessage: z.string().min(1),
     constraints: AiChatConstraintsSchema.optional(),
+    dryRun: z.boolean().optional(),
+    providedOutput: z
+      .object({
+        assistant_message: z.string(),
+        operations: z.array(OperationSchema).max(200),
+        provider: z.string().nullable().optional(),
+        model: z.string().nullable().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -57,7 +67,7 @@ export type AiChatHistoryRequest = z.infer<typeof AiChatHistoryRequestSchema>;
 export const AiChatModelOutputSchema = z
   .object({
     assistant_message: z.string(),
-    operations: z.array(OperationSchema),
+    operations: z.array(OperationSchema).max(200),
   })
   .strict();
 

@@ -69,6 +69,47 @@ describe("ai/chat schemas", () => {
     ).toBe(false);
   });
 
+  test("AiChatRequestSchema accepts dryRun and providedOutput", () => {
+    expect(
+      AiChatRequestSchema.safeParse({
+        mindmapId: "m1",
+        scope: "global",
+        userMessage: "Hello",
+        dryRun: true,
+      }).success,
+    ).toBe(true);
+
+    expect(
+      AiChatRequestSchema.safeParse({
+        mindmapId: "m1",
+        scope: "global",
+        userMessage: "Hello",
+        providedOutput: {
+          assistant_message: "OK",
+          operations: [{ type: "rename_node", nodeId: "n1", text: "Renamed" }],
+          provider: "azure-openai",
+          model: "gpt-5-mini",
+        },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      AiChatRequestSchema.safeParse({
+        mindmapId: "m1",
+        scope: "global",
+        userMessage: "Hello",
+        providedOutput: {
+          assistant_message: "OK",
+          operations: Array.from({ length: 201 }, (_, i) => ({
+            type: "rename_node",
+            nodeId: `n${i}`,
+            text: "Renamed",
+          })),
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   test("AiChatPersistedMessageSchema enforces operations presence by role", () => {
     const op = { type: "rename_node", nodeId: "n1", text: "Renamed" } as const;
 

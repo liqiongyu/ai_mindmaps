@@ -25,6 +25,13 @@ type ChatMessage = {
   rollbackToPresentId?: number;
 };
 
+type ConstraintPreset = {
+  id: string;
+  name: string;
+  constraints: AiChatConstraints;
+  updatedAt: string;
+};
+
 const PROMPT_CHIPS: Array<{ label: string; template: string }> = [
   { label: "扩展分支", template: "扩展分支：围绕当前主题补充更多分支。" },
   { label: "补全细节", template: "补全细节：为每个分支补充细节与要点。" },
@@ -33,6 +40,28 @@ const PROMPT_CHIPS: Array<{ label: string; template: string }> = [
   { label: "生成示例", template: "生成示例：为关键节点补充示例/案例。" },
   { label: "找出风险", template: "找出风险：补充风险点与对应缓解措施。" },
 ];
+
+const HIGH_RISK_DELETE_IMPACT_THRESHOLD = 10;
+
+function isAiChatConstraints(value: unknown): value is AiChatConstraints {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+
+  const outputLanguage = record.outputLanguage;
+  const branchCount = record.branchCount;
+  const depth = record.depth;
+  const allowMove = record.allowMove;
+  const allowDelete = record.allowDelete;
+
+  if (outputLanguage !== "zh" && outputLanguage !== "en") return false;
+  if (branchCount !== 2 && branchCount !== 4 && branchCount !== 6 && branchCount !== 8)
+    return false;
+  if (depth !== 1 && depth !== 2 && depth !== 3) return false;
+  if (typeof allowMove !== "boolean") return false;
+  if (typeof allowDelete !== "boolean") return false;
+
+  return true;
+}
 
 function getRoleLabel(role: ChatMessage["role"]): string {
   switch (role) {
@@ -93,6 +122,12 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
   const [loadingByThreadKey, setLoadingByThreadKey] = useState<Record<string, boolean>>({});
   const [input, setInput] = useState("");
   const [constraints, setConstraints] = useState<AiChatConstraints>(DEFAULT_AI_CHAT_CONSTRAINTS);
+  const [presets, setPresets] = useState<ConstraintPreset[]>([]);
+  const [presetsLoading, setPresetsLoading] = useState(false);
+  const [presetsError, setPresetsError] = useState<string | null>(null);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("default");
+  const [presetNameDraft, setPresetNameDraft] = useState("");
+  const [presetSaving, setPresetSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedOpsKey, setCopiedOpsKey] = useState<string | null>(null);
@@ -104,6 +139,10 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
     setLoadingByThreadKey({});
     setInput("");
     setConstraints(DEFAULT_AI_CHAT_CONSTRAINTS);
+    setSelectedPresetId("default");
+    setPresetNameDraft("");
+    setPresetsError(null);
+    setPresetSaving(false);
     setError(null);
     setSending(false);
     setCopiedOpsKey(null);
@@ -118,6 +157,213 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
   useEffect(() => {
     setError(null);
   }, [threadKey]);
+
+  const loadPresets = useCallback(async () => {
+    setPresetsLoading(true);
+    setPresetsError(null);
+    try {
+      const res = await fetch("/api/ai/constraint-presets");
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true; presets: unknown[] }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || json.ok !== true) {
+        throw new Error(
+          (json && "message" in json && json.message) || `加载预设失败（${res.status}）`,
+        );
+      }
+
+      const nextPresets: ConstraintPreset[] = [];
+      for (const item of json.presets) {
+        if (!item || typeof item !== "object") continue;
+        const record = item as Record<string, unknown>;
+        if (typeof record.id !== "string") continue;
+        if (typeof record.name !== "string") continue;
+        if (typeof record.updatedAt !== "string") continue;
+        if (!isAiChatConstraints(record.constraints)) continue;
+        nextPresets.push({
+          id: record.id,
+          name: record.name,
+          updatedAt: record.updatedAt,
+          constraints: record.constraints,
+        });
+      }
+
+      setPresets(nextPresets);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "加载预设失败";
+      setPresetsError(message);
+    } finally {
+      setPresetsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPresets();
+  }, [loadPresets]);
+
+  const onSelectPreset = useCallback(
+    (presetId: string) => {
+      setSelectedPresetId(presetId);
+      setPresetsError(null);
+
+      if (presetId === "default") {
+        setPresetNameDraft("");
+        setConstraints(DEFAULT_AI_CHAT_CONSTRAINTS);
+        return;
+      }
+
+      const preset = presets.find((p) => p.id === presetId);
+      if (!preset) {
+        setPresetNameDraft("");
+        setConstraints(DEFAULT_AI_CHAT_CONSTRAINTS);
+        return;
+      }
+
+      setPresetNameDraft(preset.name);
+      setConstraints(preset.constraints);
+    },
+    [presets],
+  );
+
+  const createPreset = useCallback(async () => {
+    const name = presetNameDraft.trim();
+    if (!name) {
+      setPresetsError("请输入预设名称");
+      return;
+    }
+
+    const payload = { name, constraints };
+    setPresetSaving(true);
+    setPresetsError(null);
+    try {
+      const res = await fetch("/api/ai/constraint-presets", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = (await res.json().catch(() => null)) as
+        | {
+            ok: true;
+            preset: ConstraintPreset;
+          }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || json.ok !== true) {
+        throw new Error((json && "message" in json && json.message) || `保存失败（${res.status}）`);
+      }
+
+      setPresets((prev) => [json.preset, ...prev.filter((p) => p.id !== json.preset.id)]);
+      setSelectedPresetId(json.preset.id);
+      setPresetNameDraft(json.preset.name);
+      uiFeedback.enqueue({
+        type: "success",
+        title: "已保存预设",
+        message: `已保存为“${json.preset.name}”。`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "保存预设失败";
+      setPresetsError(message);
+    } finally {
+      setPresetSaving(false);
+    }
+  }, [constraints, presetNameDraft]);
+
+  const updatePreset = useCallback(async () => {
+    if (selectedPresetId === "default") return;
+    const name = presetNameDraft.trim();
+    if (!name) {
+      setPresetsError("请输入预设名称");
+      return;
+    }
+
+    setPresetSaving(true);
+    setPresetsError(null);
+    try {
+      const res = await fetch(`/api/ai/constraint-presets/${selectedPresetId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, constraints }),
+      });
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true; preset: ConstraintPreset }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || json.ok !== true) {
+        throw new Error((json && "message" in json && json.message) || `更新失败（${res.status}）`);
+      }
+
+      setPresets((prev) =>
+        prev.map((p) =>
+          p.id === selectedPresetId
+            ? {
+                ...p,
+                name: json.preset.name,
+                constraints: json.preset.constraints,
+                updatedAt: json.preset.updatedAt,
+              }
+            : p,
+        ),
+      );
+      uiFeedback.enqueue({
+        type: "success",
+        title: "已更新预设",
+        message: `已更新“${json.preset.name}”。`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "更新预设失败";
+      setPresetsError(message);
+    } finally {
+      setPresetSaving(false);
+    }
+  }, [constraints, presetNameDraft, selectedPresetId]);
+
+  const deletePreset = useCallback(async () => {
+    if (selectedPresetId === "default") return;
+
+    const preset = presets.find((p) => p.id === selectedPresetId);
+    const confirmed = await uiFeedback.confirm({
+      title: "删除预设确认",
+      message: preset ? `确定删除“${preset.name}”吗？` : "确定删除该预设吗？",
+      confirmLabel: "删除",
+      cancelLabel: "取消",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+
+    setPresetSaving(true);
+    setPresetsError(null);
+    try {
+      const res = await fetch(`/api/ai/constraint-presets/${selectedPresetId}`, {
+        method: "DELETE",
+      });
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || json.ok !== true) {
+        throw new Error((json && "message" in json && json.message) || `删除失败（${res.status}）`);
+      }
+
+      setPresets((prev) => prev.filter((p) => p.id !== selectedPresetId));
+      setSelectedPresetId("default");
+      setPresetNameDraft("");
+      uiFeedback.enqueue({
+        type: "success",
+        title: "已删除预设",
+        message: preset ? `已删除“${preset.name}”。` : "已删除。",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "删除预设失败";
+      setPresetsError(message);
+    } finally {
+      setPresetSaving(false);
+    }
+  }, [presets, selectedPresetId]);
 
   useEffect(() => {
     if (!threadKey || historyAttempted) return;
@@ -235,7 +481,7 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
         selectedNodeId: scope === "node" ? selectedNodeId : null,
       });
 
-      const res = await fetch("/api/ai/chat", {
+      const previewRes = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -244,28 +490,65 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
           selectedNodeId: scope === "node" ? selectedNodeId : undefined,
           userMessage: content,
           constraints: constraintsSnapshot,
+          dryRun: true,
         }),
       });
 
-      const json = (await res.json().catch(() => null)) as
+      const previewJson = (await previewRes.json().catch(() => null)) as
         | {
             ok: true;
             assistant_message: string;
             operations: Operation[];
             provider?: string | null;
             model?: string | null;
+            dryRun?: boolean;
+            changeSummary?: {
+              add: number;
+              rename: number;
+              move: number;
+              delete: number;
+              reorder: number;
+            };
+            deleteImpact?: { nodes: number };
             persistence?: { chatPersisted?: boolean };
           }
         | { ok: false; message?: string }
         | null;
 
-      if (!res.ok || !json || json.ok !== true) {
+      if (!previewRes.ok || !previewJson || previewJson.ok !== true) {
         throw new Error(
-          (json && "message" in json && json.message) || `AI 请求失败（${res.status}）`,
+          (previewJson && "message" in previewJson && previewJson.message) ||
+            `AI 请求失败（${previewRes.status}）`,
         );
       }
 
-      const applyResult = onApplyOperations(json.operations);
+      const changeSummary =
+        previewJson.changeSummary ?? summarizeOperations(previewJson.operations);
+      const move = changeSummary.move + changeSummary.reorder;
+      const deleteImpactNodes = previewJson.deleteImpact?.nodes ?? 0;
+      const isHighRisk =
+        changeSummary.delete > 0 && deleteImpactNodes >= HIGH_RISK_DELETE_IMPACT_THRESHOLD;
+
+      if (isHighRisk) {
+        const confirmed = await uiFeedback.confirm({
+          title: "高风险确认",
+          message: `检测到高风险操作（删除影响 ${deleteImpactNodes} 个节点），请确认后应用。\n\n预览变更：新增 ${changeSummary.add} · 改名 ${changeSummary.rename} · 移动 ${move} · 删除 ${changeSummary.delete}`,
+          confirmLabel: "应用改动",
+          cancelLabel: "取消",
+          tone: "danger",
+        });
+        if (!confirmed) {
+          uiFeedback.enqueue({
+            type: "info",
+            title: "已取消应用",
+            message: "本次改动未应用。",
+          });
+          setInput(content);
+          return;
+        }
+      }
+
+      const applyResult = onApplyOperations(previewJson.operations);
       if (!applyResult.ok) {
         throw new Error(applyResult.message);
       }
@@ -273,26 +556,20 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
       track("ai_ops_applied", {
         mindmapId,
         scope,
-        operationsCount: json.operations.length,
+        operationsCount: previewJson.operations.length,
       });
 
-      const summary = summarizeOperations(json.operations);
-      const move = summary.move + summary.reorder;
       const shouldShowSummary =
-        summary.add > 0 || summary.rename > 0 || move > 0 || summary.delete > 0;
+        changeSummary.add > 0 || changeSummary.rename > 0 || move > 0 || changeSummary.delete > 0;
       if (shouldShowSummary) {
+        const deleteSuffix =
+          changeSummary.delete > 0 && deleteImpactNodes > 0
+            ? `（影响 ${deleteImpactNodes} 节点）`
+            : "";
         uiFeedback.enqueue({
           type: "success",
           title: "AI 已应用改动",
-          message: `变更摘要：新增 ${summary.add} · 改名 ${summary.rename} · 移动 ${move} · 删除 ${summary.delete}。改动已应用到画布，正在保存到云端…`,
-        });
-      }
-
-      if (json.persistence && json.persistence.chatPersisted === false) {
-        uiFeedback.enqueue({
-          type: "warning",
-          title: "聊天记录未持久化",
-          message: "聊天记录暂未持久化，刷新后可能丢失。",
+          message: `变更摘要：新增 ${changeSummary.add} · 改名 ${changeSummary.rename} · 移动 ${move} · 删除 ${changeSummary.delete}${deleteSuffix}。改动已应用到画布，正在保存到云端…`,
         });
       }
 
@@ -302,16 +579,69 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
           ...(prev[activeThreadKey] ?? []),
           {
             role: "assistant",
-            content: json.assistant_message,
-            operations: json.operations,
+            content: previewJson.assistant_message,
+            operations: previewJson.operations,
             constraints: constraintsSnapshot,
-            provider: json.provider ?? null,
-            model: json.model ?? null,
+            provider: previewJson.provider ?? null,
+            model: previewJson.model ?? null,
             createdAt: new Date().toISOString(),
             rollbackToPresentId: applyResult.rollbackToPresentId,
           },
         ],
       }));
+
+      void (async () => {
+        if (!chatPersistenceAvailable) return;
+        try {
+          const persistRes = await fetch("/api/ai/chat", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              mindmapId,
+              scope,
+              selectedNodeId: scope === "node" ? selectedNodeId : undefined,
+              userMessage: content,
+              constraints: constraintsSnapshot,
+              providedOutput: {
+                assistant_message: previewJson.assistant_message,
+                operations: previewJson.operations,
+                provider: previewJson.provider ?? null,
+                model: previewJson.model ?? null,
+              },
+            }),
+          });
+
+          const persistJson = (await persistRes.json().catch(() => null)) as
+            | {
+                ok: true;
+                persistence?: { chatPersisted?: boolean };
+              }
+            | { ok: false; message?: string }
+            | null;
+
+          if (!persistRes.ok || !persistJson || persistJson.ok !== true) {
+            throw new Error(
+              (persistJson && "message" in persistJson && persistJson.message) ||
+                `聊天记录持久化失败（${persistRes.status}）`,
+            );
+          }
+
+          if (persistJson.persistence && persistJson.persistence.chatPersisted === false) {
+            uiFeedback.enqueue({
+              type: "warning",
+              title: "聊天记录未持久化",
+              message: "聊天记录暂未持久化，刷新后可能丢失。",
+            });
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "聊天记录持久化失败";
+          uiFeedback.enqueue({
+            type: "warning",
+            title: "聊天记录未持久化",
+            message,
+          });
+        }
+      })();
     } catch (err) {
       const message = err instanceof Error ? err.message : "AI 请求失败";
       setError(message);
@@ -331,7 +661,15 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
     } finally {
       setSending(false);
     }
-  }, [constraints, input, mindmapId, onApplyOperations, scope, selectedNodeId]);
+  }, [
+    chatPersistenceAvailable,
+    constraints,
+    input,
+    mindmapId,
+    onApplyOperations,
+    scope,
+    selectedNodeId,
+  ]);
 
   useEffect(() => {
     if (!drawerMode) return;
@@ -580,6 +918,81 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
               高级设置
             </summary>
             <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="col-span-2 flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                    预设
+                  </div>
+                  <button
+                    className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                    disabled={presetsLoading || presetSaving}
+                    onClick={() => void loadPresets()}
+                    type="button"
+                  >
+                    {presetsLoading ? "刷新中…" : "刷新"}
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    className="min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] text-zinc-700 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
+                    disabled={sending || presetsLoading || presetSaving}
+                    onChange={(event) => onSelectPreset(event.target.value)}
+                    value={selectedPresetId}
+                  >
+                    <option value="default">默认</option>
+                    {presets.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] text-zinc-700 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
+                    disabled={sending || presetSaving}
+                    onChange={(event) => setPresetNameDraft(event.target.value)}
+                    placeholder="预设名称"
+                    value={presetNameDraft}
+                  />
+                  <button
+                    className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                    disabled={sending || presetSaving || presetNameDraft.trim().length === 0}
+                    onClick={() => void createPreset()}
+                    type="button"
+                  >
+                    保存
+                  </button>
+                  <button
+                    className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                    disabled={
+                      sending ||
+                      presetSaving ||
+                      selectedPresetId === "default" ||
+                      presetNameDraft.trim().length === 0
+                    }
+                    onClick={() => void updatePreset()}
+                    type="button"
+                  >
+                    更新
+                  </button>
+                  <button
+                    className="rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-950/50 dark:bg-zinc-950 dark:text-red-200 dark:hover:bg-red-950/30"
+                    disabled={sending || presetSaving || selectedPresetId === "default"}
+                    onClick={() => void deletePreset()}
+                    type="button"
+                  >
+                    删除
+                  </button>
+                </div>
+
+                {presetsError ? (
+                  <div className="text-[11px] text-red-700 dark:text-red-200">{presetsError}</div>
+                ) : null}
+              </div>
+
               <div className="flex flex-col gap-1">
                 <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
                   输出语言

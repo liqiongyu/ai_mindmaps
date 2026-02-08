@@ -16,6 +16,8 @@ import { buildAiChatMindmapContext } from "@/lib/ai/chatContext";
 import { normalizeAiMindmapOperationIds } from "@/lib/ai/mindmapOps";
 import { parseFirstJsonObject } from "@/lib/ai/json";
 import { OperationSchema, applyOperations } from "@/lib/mindmap/ops";
+import { computeDeleteImpact } from "@/lib/mindmap/operationImpact";
+import { summarizeOperations } from "@/lib/mindmap/operationSummary";
 import { nodeRowsToMindmapState } from "@/lib/mindmap/storage";
 import { validateOperationsScope } from "@/lib/mindmap/scope";
 import { createAzureOpenAIClient, getAzureOpenAIConfigFromEnv } from "@/lib/llm/azureOpenAI";
@@ -324,8 +326,15 @@ export async function POST(request: Request) {
     selectedNodeId,
     userMessage,
     constraints: requestedConstraints,
+    dryRun: dryRunRequested,
+    providedOutput,
   } = parsedRequest.data;
+  const dryRun = Boolean(dryRunRequested);
   const constraints = normalizeAiChatConstraints(requestedConstraints);
+
+  if (dryRun && providedOutput) {
+    return respondError(400, "INVALID_REQUEST", "providedOutput cannot be used with dryRun");
+  }
 
   if (scope === "node" && !selectedNodeId) {
     return respondError(
@@ -351,6 +360,89 @@ export async function POST(request: Request) {
     return respondError(404, "MINDMAP_NOT_FOUND", "Mindmap not found");
   }
 
+  if (providedOutput) {
+    const provider = providedOutput.provider ?? null;
+    const modelName = providedOutput.model ?? null;
+
+    const normalized = normalizeAiMindmapOperationIds({
+      state: { rootNodeId: mindmap.root_node_id, nodesById: {} },
+      operations: providedOutput.operations,
+    });
+    if (!normalized.ok) {
+      return respondError(400, "PROVIDED_OUTPUT_INVALID", normalized.message);
+    }
+
+    if (JSON.stringify(normalized.operations) !== JSON.stringify(providedOutput.operations)) {
+      return respondError(
+        400,
+        "PROVIDED_OUTPUT_NOT_NORMALIZED",
+        "providedOutput.operations must already be normalized UUID ops",
+      );
+    }
+
+    for (const op of normalized.operations) {
+      if (op.type === "delete_node" && op.nodeId === mindmap.root_node_id) {
+        return respondError(400, "ROOT_NODE_OPERATION", "Cannot delete root node");
+      }
+      if (op.type === "move_node" && op.nodeId === mindmap.root_node_id) {
+        return respondError(400, "ROOT_NODE_OPERATION", "Cannot move root node");
+      }
+    }
+
+    const changeSummary = summarizeOperations(normalized.operations);
+    const nodeId = scope === "node" ? (selectedNodeId ?? null) : null;
+    const threadIdResult = await getOrCreateThreadId({ supabase, mindmapId, scope, nodeId });
+
+    let chatPersisted = false;
+    if (threadIdResult.ok) {
+      const { error: insertError } = await supabase.from("chat_messages").insert([
+        {
+          thread_id: threadIdResult.threadId,
+          role: "user",
+          content: userMessage,
+          operations: null,
+          provider: null,
+          model: null,
+        },
+        {
+          thread_id: threadIdResult.threadId,
+          role: "assistant",
+          content: providedOutput.assistant_message,
+          operations: normalized.operations,
+          provider,
+          model: modelName,
+        },
+      ]);
+
+      if (!insertError) {
+        chatPersisted = true;
+      } else if (!isMissingChatPersistenceSchema(insertError)) {
+        return respondError(
+          500,
+          "CHAT_PERSIST_MESSAGES_FAILED",
+          "Failed to persist chat messages",
+          {
+            detail: insertError.message,
+          },
+        );
+      }
+    } else if (!threadIdResult.missingSchema) {
+      return respondError(500, "CHAT_PERSIST_THREAD_FAILED", "Failed to persist chat thread", {
+        detail: threadIdResult.message,
+      });
+    }
+
+    return respondOk({
+      assistant_message: providedOutput.assistant_message,
+      operations: normalized.operations,
+      provider,
+      model: modelName,
+      dryRun: false,
+      changeSummary,
+      persistence: { chatPersisted },
+    });
+  }
+
   const { data: nodeRows, error: nodesError } = await supabase
     .from("mindmap_nodes")
     .select("id,parent_id,text,notes,order_index")
@@ -369,7 +461,8 @@ export async function POST(request: Request) {
 
   const state = nodeRowsToMindmapState(mindmap.root_node_id, nodesParsed.data);
 
-  let modelName = "";
+  let provider: string | null = null;
+  let modelName: string | null = null;
   let modelOutput: z.infer<typeof AiChatModelOutputSchema> | null = null;
 
   const constraintsInstructionBlock = buildAiChatConstraintsInstructionBlock(constraints);
@@ -444,6 +537,7 @@ export async function POST(request: Request) {
 
   try {
     const config = getAzureOpenAIConfigFromEnv(process.env);
+    provider = "azure-openai";
     modelName = config.model;
     const client = createAzureOpenAIClient(config);
 
@@ -528,7 +622,9 @@ export async function POST(request: Request) {
       if (/incomplete/i.test(message) || /max_output_tokens/i.test(message)) {
         return respondError(502, "MODEL_OUTPUT_TRUNCATED", "Model output truncated");
       }
-      return respondError(502, "MODEL_OUTPUT_INVALID", "Invalid model output", { detail: message });
+      return respondError(502, "MODEL_OUTPUT_INVALID", "Invalid model output", {
+        detail: message,
+      });
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Model call failed";
@@ -564,49 +660,61 @@ export async function POST(request: Request) {
     return respondError(400, "OPERATIONS_APPLY_FAILED", message);
   }
 
-  const provider = "azure-openai" as const;
-  const nodeId = scope === "node" ? (selectedNodeId ?? null) : null;
-  const threadIdResult = await getOrCreateThreadId({ supabase, mindmapId, scope, nodeId });
+  const changeSummary = summarizeOperations(modelOutput.operations);
+  const deleteImpact = computeDeleteImpact(state, modelOutput.operations);
 
   let chatPersisted = false;
-  if (threadIdResult.ok) {
-    const { error: insertError } = await supabase.from("chat_messages").insert([
-      {
-        thread_id: threadIdResult.threadId,
-        role: "user",
-        content: userMessage,
-        operations: null,
-        provider: null,
-        model: null,
-      },
-      {
-        thread_id: threadIdResult.threadId,
-        role: "assistant",
-        content: modelOutput.assistant_message,
-        operations: modelOutput.operations,
-        provider,
-        model: modelName || null,
-      },
-    ]);
+  if (!dryRun) {
+    const nodeId = scope === "node" ? (selectedNodeId ?? null) : null;
+    const threadIdResult = await getOrCreateThreadId({ supabase, mindmapId, scope, nodeId });
 
-    if (!insertError) {
-      chatPersisted = true;
-    } else if (!isMissingChatPersistenceSchema(insertError)) {
-      return respondError(500, "CHAT_PERSIST_MESSAGES_FAILED", "Failed to persist chat messages", {
-        detail: insertError.message,
+    if (threadIdResult.ok) {
+      const { error: insertError } = await supabase.from("chat_messages").insert([
+        {
+          thread_id: threadIdResult.threadId,
+          role: "user",
+          content: userMessage,
+          operations: null,
+          provider: null,
+          model: null,
+        },
+        {
+          thread_id: threadIdResult.threadId,
+          role: "assistant",
+          content: modelOutput.assistant_message,
+          operations: modelOutput.operations,
+          provider,
+          model: modelName ?? null,
+        },
+      ]);
+
+      if (!insertError) {
+        chatPersisted = true;
+      } else if (!isMissingChatPersistenceSchema(insertError)) {
+        return respondError(
+          500,
+          "CHAT_PERSIST_MESSAGES_FAILED",
+          "Failed to persist chat messages",
+          {
+            detail: insertError.message,
+          },
+        );
+      }
+    } else if (!threadIdResult.missingSchema) {
+      return respondError(500, "CHAT_PERSIST_THREAD_FAILED", "Failed to persist chat thread", {
+        detail: threadIdResult.message,
       });
     }
-  } else if (!threadIdResult.missingSchema) {
-    return respondError(500, "CHAT_PERSIST_THREAD_FAILED", "Failed to persist chat thread", {
-      detail: threadIdResult.message,
-    });
   }
 
   return respondOk({
     assistant_message: modelOutput.assistant_message,
     operations: modelOutput.operations,
     provider,
-    model: modelName || null,
+    model: modelName,
+    dryRun,
+    changeSummary,
+    deleteImpact,
     persistence: { chatPersisted },
   });
 }
