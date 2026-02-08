@@ -33,16 +33,19 @@ describe("importTryDraft", () => {
     let counter = 0;
     const generateId = () => `id-${counter++}`;
     const { idMap } = remapMindmapStateIds(sampleMindmapState, generateId);
+    const selectedNodeId =
+      Object.values(sampleMindmapState.nodesById).find((n) => n.text === "目标")?.id ??
+      sampleMindmapState.rootNodeId;
 
     const ui = {
       collapsedNodeIds: [sampleMindmapState.rootNodeId, "missing"],
-      selectedNodeId: "a1",
+      selectedNodeId,
       viewport: null,
     };
 
     const remapped = remapMindmapUiStateIds(ui, idMap);
     expect(remapped.collapsedNodeIds).toEqual([idMap[sampleMindmapState.rootNodeId]]);
-    expect(remapped.selectedNodeId).toBe(idMap.a1);
+    expect(remapped.selectedNodeId).toBe(idMap[selectedNodeId]);
 
     const missingSelected = remapMindmapUiStateIds({ ...ui, selectedNodeId: "missing" }, idMap);
     expect(missingSelected.selectedNodeId).toBeNull();

@@ -1,13 +1,49 @@
 import type { MindmapState } from "./ops";
 
 export const sampleMindmapState: MindmapState = {
-  rootNodeId: "root",
+  rootNodeId: "00000000-0000-4000-8000-000000000001",
   nodesById: {
-    root: { id: "root", parentId: null, text: "MindMaps AI", notes: null, orderIndex: 0 },
-    a: { id: "a", parentId: "root", text: "学习", notes: null, orderIndex: 0 },
-    b: { id: "b", parentId: "root", text: "工作", notes: null, orderIndex: 1 },
-    c: { id: "c", parentId: "root", text: "生活", notes: null, orderIndex: 2 },
-    a1: { id: "a1", parentId: "a", text: "目标", notes: null, orderIndex: 0 },
-    a2: { id: "a2", parentId: "a", text: "计划", notes: null, orderIndex: 1 },
+    "00000000-0000-4000-8000-000000000001": {
+      id: "00000000-0000-4000-8000-000000000001",
+      parentId: null,
+      text: "MindMaps AI",
+      notes: null,
+      orderIndex: 0,
+    },
+    "00000000-0000-4000-8000-000000000002": {
+      id: "00000000-0000-4000-8000-000000000002",
+      parentId: "00000000-0000-4000-8000-000000000001",
+      text: "学习",
+      notes: null,
+      orderIndex: 0,
+    },
+    "00000000-0000-4000-8000-000000000003": {
+      id: "00000000-0000-4000-8000-000000000003",
+      parentId: "00000000-0000-4000-8000-000000000001",
+      text: "工作",
+      notes: null,
+      orderIndex: 1,
+    },
+    "00000000-0000-4000-8000-000000000004": {
+      id: "00000000-0000-4000-8000-000000000004",
+      parentId: "00000000-0000-4000-8000-000000000001",
+      text: "生活",
+      notes: null,
+      orderIndex: 2,
+    },
+    "00000000-0000-4000-8000-000000000005": {
+      id: "00000000-0000-4000-8000-000000000005",
+      parentId: "00000000-0000-4000-8000-000000000002",
+      text: "目标",
+      notes: null,
+      orderIndex: 0,
+    },
+    "00000000-0000-4000-8000-000000000006": {
+      id: "00000000-0000-4000-8000-000000000006",
+      parentId: "00000000-0000-4000-8000-000000000002",
+      text: "计划",
+      notes: null,
+      orderIndex: 1,
+    },
   },
 };

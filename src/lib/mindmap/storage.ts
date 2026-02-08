@@ -3,8 +3,8 @@ import { z } from "zod";
 import type { MindmapNode, MindmapState } from "./ops";
 
 export const MindmapNodeSchema = z.object({
-  id: z.string().min(1),
-  parentId: z.string().min(1).nullable(),
+  id: z.string().uuid(),
+  parentId: z.string().uuid().nullable(),
   text: z.string().min(1),
   notes: z.string().nullable(),
   orderIndex: z.number().int().nonnegative(),
@@ -14,8 +14,8 @@ export const MindmapNodeSchema = z.object({
 
 export const MindmapStateSchema = z
   .object({
-    rootNodeId: z.string().min(1),
-    nodesById: z.record(z.string().min(1), MindmapNodeSchema),
+    rootNodeId: z.string().uuid(),
+    nodesById: z.record(z.string().uuid(), MindmapNodeSchema),
   })
   .superRefine((value, ctx) => {
     const root = value.nodesById[value.rootNodeId];
@@ -24,6 +24,14 @@ export const MindmapStateSchema = z
         code: z.ZodIssueCode.custom,
         message: "rootNodeId must exist in nodesById",
         path: ["rootNodeId"],
+      });
+      return;
+    }
+    if (root.id !== value.rootNodeId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "rootNodeId must match root node id",
+        path: ["nodesById", value.rootNodeId, "id"],
       });
       return;
     }
@@ -36,6 +44,13 @@ export const MindmapStateSchema = z
     }
 
     for (const [nodeId, node] of Object.entries(value.nodesById)) {
+      if (nodeId !== node.id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "nodesById key must match node id",
+          path: ["nodesById", nodeId, "id"],
+        });
+      }
       if (nodeId === value.rootNodeId) continue;
       if (node.parentId === null) {
         ctx.addIssue({
