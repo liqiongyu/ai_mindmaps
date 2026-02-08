@@ -44,7 +44,7 @@ export default function PrivacyPage() {
           <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
             <div className="text-sm font-medium">基础运行日志与用量</div>
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-              为了保障稳定性与用量控制，我们可能记录必要的接口调用与计数信息（不包含公开分享内容以外的访问者身份信息）。
+              为了保障稳定性与用量控制，我们可能记录必要的接口调用与计数信息（例如状态码、耗时等）。
             </p>
           </div>
         </div>

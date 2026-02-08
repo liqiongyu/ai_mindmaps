@@ -188,7 +188,7 @@ export default function Home() {
               安全
             </Link>
             <Link className="underline" href="/trust">
-              Trust
+              信任
             </Link>
           </div>
         </footer>
