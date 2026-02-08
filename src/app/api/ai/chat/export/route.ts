@@ -142,7 +142,7 @@ export async function GET(request: Request) {
   }
 
   if (!quotaCheck.ok) {
-    return respondError(429, "quota_exceeded", "今日导出已达上限，明日重置或升级套餐。", {
+    return respondError(429, "quota_exceeded", "今日审计导出已达上限，明日重置或升级套餐。", {
       metric: quotaCheck.metric,
       used: quotaCheck.used,
       limit: quotaCheck.limit,
@@ -252,7 +252,7 @@ export async function GET(request: Request) {
   }
 
   if (!quota.ok) {
-    return respondError(429, "quota_exceeded", "今日导出已达上限，明日重置或升级套餐。", {
+    return respondError(429, "quota_exceeded", "今日审计导出已达上限，明日重置或升级套餐。", {
       metric: quota.metric,
       used: quota.used,
       limit: quota.limit,

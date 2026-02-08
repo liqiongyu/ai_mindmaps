@@ -466,8 +466,8 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
     if (scope === "node" && !selectedNodeId) {
       uiFeedback.enqueue({
         type: "info",
-        title: "无法导出",
-        message: "请选择一个节点以启用节点模式后再导出。",
+        title: "无法审计导出",
+        message: "请选择一个节点以启用节点模式后再审计导出。",
       });
       return;
     }
@@ -501,12 +501,12 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
             : code === "CHAT_THREAD_NOT_FOUND"
               ? "当前会话暂无可导出的聊天记录。"
               : code === "quota_exceeded"
-                ? (serverMessage ?? "今日导出已达上限，明日重置或升级套餐。")
-                : (serverMessage ?? `导出失败（${res.status}）`);
+                ? (serverMessage ?? "今日审计导出已达上限，明日重置或升级套餐。")
+                : (serverMessage ?? `审计导出失败（${res.status}）`);
 
         uiFeedback.enqueue({
           type: "error",
-          title: "导出失败",
+          title: "审计导出失败",
           message,
           actions:
             code === "quota_exceeded" && upgradeUrl
@@ -540,10 +540,10 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
         message: "审计记录已导出。",
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "导出失败";
+      const message = err instanceof Error ? err.message : "审计导出失败";
       uiFeedback.enqueue({
         type: "error",
-        title: "导出失败",
+        title: "审计导出失败",
         message,
       });
     } finally {
@@ -857,9 +857,13 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
               disabled={exporting || nodeModeBlocked || !historyAttempted}
               onClick={() => void exportAudit()}
               type="button"
+              title="导出会话审计 JSON（不是 PNG/SVG 导图导出）"
             >
-              {exporting ? "导出中…" : "导出"}
+              {exporting ? "导出中…" : "审计导出"}
             </button>
+            <span className="text-[10px] text-zinc-500" title="审计导出为会话 JSON，不是 PNG/SVG。">
+              JSON
+            </span>
             <div className="inline-flex overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800">
               <button
                 className={`px-2 py-1 text-xs ${
