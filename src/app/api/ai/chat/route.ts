@@ -24,7 +24,7 @@ import { createAzureOpenAIClient, getAzureOpenAIConfigFromEnv } from "@/lib/llm/
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { logApi } from "@/lib/telemetry/apiLog";
 import { getPlanKeyFromEnv, getUpgradeUrlFromEnv } from "@/lib/usage/plan";
-import { consumeQuota } from "@/lib/usage/quota";
+import { checkQuota, consumeQuota } from "@/lib/usage/quota";
 
 function jsonError(status: number, message: string, extra?: Record<string, unknown>) {
   return NextResponse.json({ ok: false, message, ...extra }, { status });
@@ -546,9 +546,9 @@ export async function POST(request: Request) {
     .filter(Boolean)
     .join("\n");
 
-  let quota: Awaited<ReturnType<typeof consumeQuota>>;
+  let quota: Awaited<ReturnType<typeof checkQuota>>;
   try {
-    quota = await consumeQuota({
+    quota = await checkQuota({
       supabase,
       metric: "ai_chat",
       plan: planKey,
@@ -567,6 +567,7 @@ export async function POST(request: Request) {
       limit: quota.limit,
       resetAt: quota.resetAt,
       upgradeUrl,
+      phase: "precheck",
     });
   }
 
@@ -710,6 +711,31 @@ export async function POST(request: Request) {
   const changeSummary = summarizeOperations(modelOutput.operations);
   const deleteImpact = computeDeleteImpact(state, modelOutput.operations);
 
+  let chargedQuota: Awaited<ReturnType<typeof consumeQuota>>;
+  try {
+    chargedQuota = await consumeQuota({
+      supabase,
+      metric: "ai_chat",
+      plan: planKey,
+      period: "day",
+      amount: 1,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Unknown error";
+    return respondError(500, "QUOTA_CHARGE_FAILED", "Failed to charge quota", { detail });
+  }
+
+  if (!chargedQuota.ok) {
+    return respondError(429, "quota_exceeded", "今日 AI 调用已达上限，明日重置或升级套餐。", {
+      metric: chargedQuota.metric,
+      used: chargedQuota.used,
+      limit: chargedQuota.limit,
+      resetAt: chargedQuota.resetAt,
+      upgradeUrl,
+      phase: "consume",
+    });
+  }
+
   let chatPersisted = false;
   if (!dryRun) {
     const nodeId = scope === "node" ? (selectedNodeId ?? null) : null;
@@ -738,19 +764,28 @@ export async function POST(request: Request) {
       if (!insertError) {
         chatPersisted = true;
       } else if (!isMissingChatPersistenceSchema(insertError)) {
-        return respondError(
-          500,
-          "CHAT_PERSIST_MESSAGES_FAILED",
-          "Failed to persist chat messages",
-          {
+        console.warn(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            type: "chat_persist_warning",
+            mindmapId,
+            scope,
+            selectedNodeId: scope === "node" ? selectedNodeId : null,
             detail: insertError.message,
-          },
+          }),
         );
       }
     } else if (!threadIdResult.missingSchema) {
-      return respondError(500, "CHAT_PERSIST_THREAD_FAILED", "Failed to persist chat thread", {
-        detail: threadIdResult.message,
-      });
+      console.warn(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          type: "chat_thread_warning",
+          mindmapId,
+          scope,
+          selectedNodeId: scope === "node" ? selectedNodeId : null,
+          detail: threadIdResult.message,
+        }),
+      );
     }
   }
 

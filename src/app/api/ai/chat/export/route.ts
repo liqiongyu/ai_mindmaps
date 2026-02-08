@@ -8,7 +8,7 @@ import { OperationSchema } from "@/lib/mindmap/ops";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { logApi } from "@/lib/telemetry/apiLog";
 import { getPlanKeyFromEnv, getUpgradeUrlFromEnv } from "@/lib/usage/plan";
-import { consumeQuota } from "@/lib/usage/quota";
+import { checkQuota, consumeQuota } from "@/lib/usage/quota";
 
 function isMissingChatPersistenceSchema(error: { code?: string; message: string }): boolean {
   if (error.code === "PGRST205") return true;
@@ -127,6 +127,31 @@ export async function GET(request: Request) {
     return respondError(404, "MINDMAP_NOT_FOUND", "Mindmap not found");
   }
 
+  let quotaCheck: Awaited<ReturnType<typeof checkQuota>>;
+  try {
+    quotaCheck = await checkQuota({
+      supabase,
+      metric: "audit_export",
+      plan: planKey,
+      period: "day",
+      amount: 1,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Unknown error";
+    return respondError(500, "QUOTA_CHECK_FAILED", "Failed to check quota", { detail });
+  }
+
+  if (!quotaCheck.ok) {
+    return respondError(429, "quota_exceeded", "今日导出已达上限，明日重置或升级套餐。", {
+      metric: quotaCheck.metric,
+      used: quotaCheck.used,
+      limit: quotaCheck.limit,
+      resetAt: quotaCheck.resetAt,
+      upgradeUrl,
+      phase: "precheck",
+    });
+  }
+
   const threadQuery = supabase
     .from("chat_threads")
     .select("id,scope,node_id,created_at")
@@ -223,7 +248,7 @@ export async function GET(request: Request) {
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : "Unknown error";
-    return respondError(500, "QUOTA_CHECK_FAILED", "Failed to check quota", { detail });
+    return respondError(500, "QUOTA_CHARGE_FAILED", "Failed to charge quota", { detail });
   }
 
   if (!quota.ok) {
@@ -233,6 +258,7 @@ export async function GET(request: Request) {
       limit: quota.limit,
       resetAt: quota.resetAt,
       upgradeUrl,
+      phase: "consume",
     });
   }
 
