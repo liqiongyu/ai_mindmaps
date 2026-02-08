@@ -16,7 +16,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
   });
 
   if (error) {
-    return jsonError(500, "Failed to load public mindmap", { detail: error.message });
+    console.error("Failed to load public mindmap snapshot", {
+      slug,
+      error,
+    });
+    return jsonError(500, "Failed to load public mindmap");
   }
 
   const row = Array.isArray(rows) ? rows[0] : null;
