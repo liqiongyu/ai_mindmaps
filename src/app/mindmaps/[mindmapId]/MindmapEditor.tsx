@@ -1460,11 +1460,30 @@ export function MindmapEditor(props: MindmapEditorProps) {
       const res = await fetch(`/api/mindmaps/${persistedMindmapId}/share`, { method: "POST" });
       const json = (await res.json().catch(() => null)) as
         | { ok: true; publicSlug: string }
-        | { ok: false; message?: string }
+        | { ok: false; message?: string; code?: string; upgradeUrl?: string }
         | null;
 
       if (!res.ok || !json || json.ok !== true) {
-        throw new Error((json && "message" in json && json.message) || `分享失败（${res.status}）`);
+        const message = (json && "message" in json && json.message) || `分享失败（${res.status}）`;
+        if (
+          json &&
+          json.ok === false &&
+          json.code === "quota_exceeded" &&
+          typeof json.upgradeUrl === "string"
+        ) {
+          uiFeedback.enqueue({
+            type: "warning",
+            title: "公开分享已达上限",
+            message,
+            actions: [
+              {
+                label: "升级",
+                onClick: () => window.location.assign(json.upgradeUrl as string),
+              },
+            ],
+          });
+        }
+        throw new Error(message);
       }
 
       const url = new URL(`/public/${json.publicSlug}`, window.location.origin).toString();

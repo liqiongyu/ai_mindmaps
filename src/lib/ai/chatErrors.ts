@@ -4,6 +4,11 @@ export type AiChatErrorInfo = {
   hints: string[];
   contextChars: number | null;
   budgetMaxChars: number | null;
+  upgradeUrl: string | null;
+  metric: string | null;
+  used: number | null;
+  limit: number | null;
+  resetAt: string | null;
 };
 
 export function parseAiChatErrorInfo(payload: unknown): AiChatErrorInfo {
@@ -14,6 +19,11 @@ export function parseAiChatErrorInfo(payload: unknown): AiChatErrorInfo {
       hints: [],
       contextChars: null,
       budgetMaxChars: null,
+      upgradeUrl: null,
+      metric: null,
+      used: null,
+      limit: null,
+      resetAt: null,
     };
   }
 
@@ -37,7 +47,25 @@ export function parseAiChatErrorInfo(payload: unknown): AiChatErrorInfo {
     }
   }
 
-  return { code, serverMessage, hints, contextChars, budgetMaxChars };
+  const upgradeUrl = typeof record.upgradeUrl === "string" ? record.upgradeUrl : null;
+  const metric = typeof record.metric === "string" ? record.metric : null;
+  const used = typeof record.used === "number" ? record.used : null;
+  const limit =
+    typeof record.limit === "number" ? record.limit : record.limit === null ? null : null;
+  const resetAt = typeof record.resetAt === "string" ? record.resetAt : null;
+
+  return {
+    code,
+    serverMessage,
+    hints,
+    contextChars,
+    budgetMaxChars,
+    upgradeUrl,
+    metric,
+    used,
+    limit,
+    resetAt,
+  };
 }
 
 export function formatAiChatActionableErrorMessage(args: {
@@ -61,6 +89,8 @@ export function formatAiChatActionableErrorMessage(args: {
       return `AI 输出被截断，本次未应用改动：请缩小范围后重试。\n\n建议：\n1) 切换节点模式\n2) 降低深度到 1-2\n3) 仅处理当前分支`;
     case "model_output_empty":
       return `AI 未返回有效结果，本次未应用改动：请缩小范围后重试。\n\n建议：\n1) 切换节点模式\n2) 降低深度到 1-2\n3) 仅处理当前分支`;
+    case "quota_exceeded":
+      return serverMessage ?? "用量已达上限，请稍后重试或升级套餐。";
     default:
       return serverMessage ?? `AI 请求失败（${status}）`;
   }

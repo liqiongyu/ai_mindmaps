@@ -7,6 +7,8 @@ import { buildAiChatAuditExportFilename } from "@/lib/ai/chatExport";
 import { OperationSchema } from "@/lib/mindmap/ops";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { logApi } from "@/lib/telemetry/apiLog";
+import { getPlanKeyFromEnv, getUpgradeUrlFromEnv } from "@/lib/usage/plan";
+import { consumeQuota } from "@/lib/usage/quota";
 
 function isMissingChatPersistenceSchema(error: { code?: string; message: string }): boolean {
   if (error.code === "PGRST205") return true;
@@ -39,6 +41,8 @@ export async function GET(request: Request) {
   const route = "/api/ai/chat/export";
   const method = "GET";
   let userId: string | null = null;
+  const planKey = getPlanKeyFromEnv();
+  const upgradeUrl = getUpgradeUrlFromEnv();
 
   const respondOk = (payload: unknown, filename: string) => {
     logApi({
@@ -207,6 +211,30 @@ export async function GET(request: Request) {
     selectedNodeId: scope === "node" ? selectedNodeId : null,
     exportedAt,
   });
+
+  let quota: Awaited<ReturnType<typeof consumeQuota>>;
+  try {
+    quota = await consumeQuota({
+      supabase,
+      metric: "audit_export",
+      plan: planKey,
+      period: "day",
+      amount: 1,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Unknown error";
+    return respondError(500, "QUOTA_CHECK_FAILED", "Failed to check quota", { detail });
+  }
+
+  if (!quota.ok) {
+    return respondError(429, "quota_exceeded", "今日导出已达上限，明日重置或升级套餐。", {
+      metric: quota.metric,
+      used: quota.used,
+      limit: quota.limit,
+      resetAt: quota.resetAt,
+      upgradeUrl,
+    });
+  }
 
   return respondOk(responseParsed.data, filename);
 }

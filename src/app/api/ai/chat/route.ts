@@ -23,6 +23,8 @@ import { validateOperationsScope } from "@/lib/mindmap/scope";
 import { createAzureOpenAIClient, getAzureOpenAIConfigFromEnv } from "@/lib/llm/azureOpenAI";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { logApi } from "@/lib/telemetry/apiLog";
+import { getPlanKeyFromEnv, getUpgradeUrlFromEnv } from "@/lib/usage/plan";
+import { consumeQuota } from "@/lib/usage/quota";
 
 function jsonError(status: number, message: string, extra?: Record<string, unknown>) {
   return NextResponse.json({ ok: false, message, ...extra }, { status });
@@ -261,6 +263,8 @@ export async function POST(request: Request) {
   const route = "/api/ai/chat";
   const method = "POST";
   let userId: string | null = null;
+  const planKey = getPlanKeyFromEnv();
+  const upgradeUrl = getUpgradeUrlFromEnv();
 
   const respondOk = (payload: Record<string, unknown>) => {
     logApi({
@@ -541,6 +545,30 @@ export async function POST(request: Request) {
   ]
     .filter(Boolean)
     .join("\n");
+
+  let quota: Awaited<ReturnType<typeof consumeQuota>>;
+  try {
+    quota = await consumeQuota({
+      supabase,
+      metric: "ai_chat",
+      plan: planKey,
+      period: "day",
+      amount: 1,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Unknown error";
+    return respondError(500, "QUOTA_CHECK_FAILED", "Failed to check quota", { detail });
+  }
+
+  if (!quota.ok) {
+    return respondError(429, "quota_exceeded", "今日 AI 调用已达上限，明日重置或升级套餐。", {
+      metric: quota.metric,
+      used: quota.used,
+      limit: quota.limit,
+      resetAt: quota.resetAt,
+      upgradeUrl,
+    });
+  }
 
   try {
     const config = getAzureOpenAIConfigFromEnv(process.env);
