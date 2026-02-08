@@ -26,6 +26,8 @@ const tables = [
   "mindmap_templates",
   "chat_threads",
   "chat_messages",
+  "plan_limits",
+  "usage_counters",
 ];
 let allOk = true;
 

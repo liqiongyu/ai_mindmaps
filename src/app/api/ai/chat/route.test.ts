@@ -45,6 +45,30 @@ vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: mocks.createSupabaseServerClient,
 }));
 
+function mockConsumeQuota(
+  supabase: SupabaseMock,
+  overrides?: { ok?: boolean; used?: number; limit?: number | null },
+) {
+  const ok = overrides?.ok ?? true;
+  const used = overrides?.used ?? 1;
+  const limit = overrides?.limit ?? 100;
+  supabase.__setRpcHandler("mma_consume_quota", async () => ({
+    data: [
+      {
+        ok,
+        metric: "ai_chat",
+        plan: "free",
+        period: "day",
+        period_start: "2026-02-08",
+        used,
+        limit,
+        reset_at: "2026-02-09T00:00:00.000Z",
+      },
+    ],
+    error: null,
+  }));
+}
+
 describe("/api/ai/chat route", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -204,6 +228,7 @@ describe("/api/ai/chat route", () => {
     });
 
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1", root_node_id: rootNodeId },
       error: null,
@@ -256,6 +281,7 @@ describe("/api/ai/chat route", () => {
     });
 
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1", root_node_id: rootNodeId },
       error: null,
@@ -291,6 +317,47 @@ describe("/api/ai/chat route", () => {
     expect(await res.json()).toMatchObject({ ok: false, code: "CONSTRAINT_VIOLATION" });
   });
 
+  test("POST returns 429 quota_exceeded when quota is exhausted", async () => {
+    const rootNodeId = "00000000-0000-4000-8000-000000000001";
+    openaiMocks.state.response.output_text = JSON.stringify({
+      assistant_message: "OK",
+      operations: [{ type: "rename_node", nodeId: rootNodeId, text: "Root (renamed)" }],
+    });
+
+    const supabase = createSupabaseMock({ userId: "u1" });
+    mockConsumeQuota(supabase, { ok: false, used: 100, limit: 100 });
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: { id: "m1", root_node_id: rootNodeId },
+      error: null,
+    }));
+    supabase.__setQueryHandler("mindmap_nodes.select", async () => ({
+      data: [{ id: rootNodeId, parent_id: null, text: "Root", notes: null, order_index: 0 }],
+      error: null,
+    }));
+    mocks.state.supabase = supabase;
+
+    const { POST } = await import("./route");
+    const res = await POST(
+      new Request("http://localhost/api/ai/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mindmapId: "m1",
+          scope: "global",
+          userMessage: "Rename root",
+          dryRun: true,
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      code: "quota_exceeded",
+      upgradeUrl: "/pricing",
+    });
+  });
+
   test("POST returns 400 SCOPE_VIOLATION when node-scoped operations modify outside subtree", async () => {
     const rootNodeId = "00000000-0000-4000-8000-000000000001";
     const studyId = "00000000-0000-4000-8000-000000000002";
@@ -302,6 +369,7 @@ describe("/api/ai/chat route", () => {
     });
 
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1", root_node_id: rootNodeId },
       error: null,
@@ -342,6 +410,7 @@ describe("/api/ai/chat route", () => {
     });
 
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1", root_node_id: rootNodeId },
       error: null,

@@ -15,6 +15,7 @@ describe("ai/chatErrors", () => {
     expect(info.serverMessage).toBe("Context too large");
     expect(info.contextChars).toBe(1234);
     expect(info.budgetMaxChars).toBe(500);
+    expect(info.upgradeUrl).toBe(null);
   });
 
   test("formats actionable copy for standardized codes", () => {

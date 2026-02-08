@@ -492,18 +492,26 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
         const record = json && typeof json === "object" ? (json as Record<string, unknown>) : null;
         const code = record && typeof record.code === "string" ? record.code : null;
         const serverMessage = record && typeof record.message === "string" ? record.message : null;
+        const upgradeUrl =
+          record && typeof record.upgradeUrl === "string" ? (record.upgradeUrl as string) : null;
 
         const message =
           code === "chat_persistence_unavailable"
             ? "聊天记录未持久化，无法导出。"
             : code === "CHAT_THREAD_NOT_FOUND"
               ? "当前会话暂无可导出的聊天记录。"
-              : (serverMessage ?? `导出失败（${res.status}）`);
+              : code === "quota_exceeded"
+                ? (serverMessage ?? "今日导出已达上限，明日重置或升级套餐。")
+                : (serverMessage ?? `导出失败（${res.status}）`);
 
         uiFeedback.enqueue({
           type: "error",
           title: "导出失败",
           message,
+          actions:
+            code === "quota_exceeded" && upgradeUrl
+              ? [{ label: "升级", onClick: () => window.location.assign(upgradeUrl) }]
+              : undefined,
         });
         return;
       }
@@ -607,6 +615,12 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
         });
 
         const actions: Array<{ label: string; onClick: () => void }> = [];
+        if (info.code === "quota_exceeded" && info.upgradeUrl) {
+          actions.push({
+            label: "升级",
+            onClick: () => window.location.assign(info.upgradeUrl as string),
+          });
+        }
         if (
           (info.code === "context_too_large" ||
             info.code === "model_output_truncated" ||

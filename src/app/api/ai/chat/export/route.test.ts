@@ -14,6 +14,30 @@ vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: mocks.createSupabaseServerClient,
 }));
 
+function mockConsumeQuota(
+  supabase: SupabaseMock,
+  overrides?: { ok?: boolean; used?: number; limit?: number | null },
+) {
+  const ok = overrides?.ok ?? true;
+  const used = overrides?.used ?? 1;
+  const limit = overrides?.limit ?? 50;
+  supabase.__setRpcHandler("mma_consume_quota", async () => ({
+    data: [
+      {
+        ok,
+        metric: "audit_export",
+        plan: "free",
+        period: "day",
+        period_start: "2026-02-08",
+        used,
+        limit,
+        reset_at: "2026-02-09T00:00:00.000Z",
+      },
+    ],
+    error: null,
+  }));
+}
+
 describe("/api/ai/chat/export route", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -64,6 +88,7 @@ describe("/api/ai/chat/export route", () => {
 
   test("exports audit payload as an attachment", async () => {
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1" },
       error: null,
@@ -101,6 +126,46 @@ describe("/api/ai/chat/export route", () => {
       version: "v1",
       mindmapId: "m1",
       thread: { id: "t1", scope: "global", nodeId: null },
+    });
+  });
+
+  test("returns 429 when over quota", async () => {
+    const supabase = createSupabaseMock({ userId: "u1" });
+    mockConsumeQuota(supabase, { ok: false, used: 50, limit: 50 });
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: { id: "m1" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_threads.select", async () => ({
+      data: { id: "t1", scope: "global", node_id: null, created_at: "2026-02-08T00:00:00.000Z" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_messages.select", async () => ({
+      data: [
+        {
+          id: "msg1",
+          role: "user",
+          content: "hi",
+          operations: null,
+          provider: null,
+          model: null,
+          created_at: "2026-02-08T00:00:01.000Z",
+        },
+      ],
+      error: null,
+    }));
+    mocks.state.supabase = supabase;
+
+    const { GET } = await import("./route");
+    const res = await GET(
+      new Request("http://localhost/api/ai/chat/export?mindmapId=m1&scope=global"),
+    );
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      code: "quota_exceeded",
+      upgradeUrl: "/pricing",
     });
   });
 });
