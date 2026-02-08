@@ -8,7 +8,7 @@
 
 - 发布（生产部署）：PR checks 全绿 → merge 到 `main` → 等 Vercel 生产部署完成
 - E2E：在 Actions 里手动触发 `E2E`（需要配置 Azure OpenAI 相关 secrets）
-- Release notes / Tag：`Release Please` 自动开 release PR，并自动开启 auto-merge；checks 全绿后自动合并并打 tag / GitHub Release
+- Release notes / Tag：`Release Please PR` 自动开/更新 release PR；checks 全绿后自动合并；`Release Please Publish` 在合并时自动打 tag / GitHub Release
 
 ## 1) 发布前检查（建议顺序）
 
@@ -29,8 +29,8 @@
 gh secret list | rg RELEASE_PLEASE_TOKEN
 ```
 
-> `.github/workflows/release-please.yml` 现已改为：缺失 `RELEASE_PLEASE_TOKEN` 时直接失败并报错。
-> `.github/workflows/release-please-automerge.yml` 会在 release PR 创建/更新时自动执行 `gh pr merge --auto`。
+> `.github/workflows/release-please.yml` 现已改为：缺失 `RELEASE_PLEASE_TOKEN` 时直接失败并报错，并在每次运行时自动保持 release PR 与 `main` 同步、自动确保 auto-merge 开启。
+> `.github/workflows/release-please-publish.yml` 会在 release PR 合并后自动发布 GitHub Release（无需手动 `workflow_dispatch`）。
 
 ## 3) 触发 E2E（可选但推荐）
 
@@ -56,11 +56,12 @@ gh run watch
 
 ## 5) 版本与 Release（可选但推荐）
 
-合并到 `main` 后，`Release Please` 会根据 Conventional Commits 自动创建/更新 release PR：
+合并到 `main` 后，流程如下：
 
-- release PR 会自动开启 auto-merge（`squash`）
-- `CI`、`Dependency Review`、`Vercel` 均通过后自动合并
-- 合并后自动创建 tag（例如 `v0.1.1`）并生成 GitHub Release（自动 notes）
+1. `Release Please PR` 根据 Conventional Commits 自动创建/更新 release PR
+2. workflow 会自动保持 release PR 与 `main` 同步，并确保 auto-merge（`squash`）开启
+3. `CI`、`Dependency Review`、`Vercel` 均通过后自动合并
+4. `Release Please Publish` 在 release PR 合并事件上自动创建 tag（例如 `v0.1.1`）并生成 GitHub Release（自动 notes）
 
 如果你更倾向于手动发布，也可以直接生成 Release：
 
