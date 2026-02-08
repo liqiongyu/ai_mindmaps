@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MindmapChatSidebar } from "./MindmapChatSidebar";
 import { MindmapCanvas, type MindmapCanvasHandle } from "./MindmapCanvas";
 import { MindmapNodeInspectorModal } from "./MindmapNodeInspectorModal";
+import { MindmapSaveConflictModal } from "./MindmapSaveConflictModal";
 
 import { TryDraftImportModal, type TryDraftImportAction } from "@/app/try/TryDraftImportModal";
 import type { MindmapState, Operation } from "@/lib/mindmap/ops";
@@ -41,7 +42,7 @@ type EditorActionResult =
   | { ok: true; nextState: MindmapState; nextSelectedNodeId: string | null }
   | { ok: false; message: string };
 
-type SaveStatus = "idle" | "loading" | "saving" | "saved" | "error";
+type SaveStatus = "idle" | "loading" | "saving" | "saved" | "error" | "conflict";
 
 const MAX_HISTORY_PAST = 50;
 const NEW_NODE_DEFAULT_TITLE = "新节点";
@@ -108,6 +109,11 @@ export function MindmapEditor(props: MindmapEditorProps) {
   });
   const [saveError, setSaveError] = useState<string | null>(null);
   const [persistedSavePaused, setPersistedSavePaused] = useState(false);
+  const [persistedVersion, setPersistedVersion] = useState<number | null>(null);
+  const [saveConflict, setSaveConflict] = useState<{ serverVersion: number } | null>(null);
+  const [saveConflictCopying, setSaveConflictCopying] = useState(false);
+  const [saveConflictCopyError, setSaveConflictCopyError] = useState<string | null>(null);
+  const [persistedReloadSeq, setPersistedReloadSeq] = useState(0);
   const [uiSaveError, setUiSaveError] = useState<string | null>(null);
   const [persistence, setPersistence] = useState<{ chat: boolean; uiState: boolean } | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -150,8 +156,9 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const saveSeqRef = useRef(0);
   const skipNextSaveRef = useRef(false);
   const persistedSaveInFlightRef = useRef(false);
-  const persistedSaveQueuedBodyRef = useRef<string | null>(null);
+  const persistedSaveQueuedStateRef = useRef<MindmapState | null>(null);
   const persistedSavePausedRef = useRef(false);
+  const persistedVersionRef = useRef<number | null>(persistedVersion);
   const uiSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const uiSaveSeqRef = useRef(0);
   const skipNextUiSaveRef = useRef(false);
@@ -227,6 +234,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    persistedVersionRef.current = persistedVersion;
+  }, [persistedVersion]);
 
   useEffect(() => {
     inspectorOpenRef.current = inspectorOpen;
@@ -338,6 +349,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
     setLoadError(null);
     setSaveError(null);
     setPersistedSavePaused(false);
+    setPersistedVersion(null);
+    setSaveConflict(null);
+    setSaveConflictCopyError(null);
+    setSaveConflictCopying(false);
     setUiSaveError(null);
     setPersistence(null);
     setShareUrl(null);
@@ -361,8 +376,9 @@ export function MindmapEditor(props: MindmapEditorProps) {
     uiSaveSeqRef.current = 0;
     pendingSaveRef.current = false;
     persistedSaveInFlightRef.current = false;
-    persistedSaveQueuedBodyRef.current = null;
+    persistedSaveQueuedStateRef.current = null;
     persistedSavePausedRef.current = false;
+    persistedVersionRef.current = null;
     pendingUiSaveRef.current = false;
     uiStateJsonRef.current = null;
     setSelectedNodeId(null);
@@ -375,7 +391,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
               ok: true;
               state: unknown;
               ui?: unknown;
-              mindmap?: { isPublic?: boolean; publicSlug?: string | null };
+              mindmap?: { isPublic?: boolean; publicSlug?: string | null; version?: unknown };
               persistence?: { chat?: boolean; uiState?: boolean };
             }
           | { ok: false; message?: string }
@@ -407,6 +423,13 @@ export function MindmapEditor(props: MindmapEditorProps) {
           setShareUrl(null);
         }
         setCopied(false);
+        const versionRaw = json.mindmap?.version;
+        const version = typeof versionRaw === "string" ? Number(versionRaw) : versionRaw;
+        if (typeof version !== "number" || !Number.isFinite(version) || version < 1) {
+          throw new Error("导图版本无效");
+        }
+        persistedVersionRef.current = version;
+        setPersistedVersion(version);
         skipNextSaveRef.current = true;
         skipNextUiSaveRef.current = true;
         stateRef.current = parsed.data;
@@ -436,7 +459,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     return () => {
       cancelled = true;
     };
-  }, [persistedMindmapId]);
+  }, [persistedMindmapId, persistedReloadSeq]);
 
   useEffect(() => {
     if (!persistedMindmapId) return;
@@ -510,10 +533,19 @@ export function MindmapEditor(props: MindmapEditorProps) {
     if (!persistedMindmapId) return;
     if (persistedSaveInFlightRef.current) return;
     if (persistedSavePausedRef.current) return;
-    const body = persistedSaveQueuedBodyRef.current;
-    if (!body) return;
+    const queuedState = persistedSaveQueuedStateRef.current;
+    if (!queuedState) return;
 
-    persistedSaveQueuedBodyRef.current = null;
+    const baseVersion = persistedVersionRef.current;
+    if (!baseVersion) {
+      persistedSavePausedRef.current = true;
+      setPersistedSavePaused(true);
+      setSaveStatus("error");
+      setSaveError("保存失败：缺少版本信息");
+      return;
+    }
+
+    persistedSaveQueuedStateRef.current = null;
     persistedSaveInFlightRef.current = true;
     const requestId = (saveSeqRef.current += 1);
 
@@ -521,29 +553,73 @@ export function MindmapEditor(props: MindmapEditorProps) {
       const res = await fetch(`/api/mindmaps/${persistedMindmapId}/save`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body,
+        body: JSON.stringify({ state: queuedState, baseVersion }),
       });
       const json = (await res.json().catch(() => null)) as
-        | { ok: true }
-        | { ok: false; message?: string }
+        | { ok: true; version: unknown }
+        | { ok: false; code?: string; message?: string; serverVersion?: unknown }
         | null;
 
-      if (!res.ok || !json || json.ok !== true) {
-        throw new Error((json && "message" in json && json.message) || `保存失败（${res.status}）`);
+      if (res.ok && json && json.ok === true) {
+        const nextVersionRaw = json.version;
+        const nextVersion =
+          typeof nextVersionRaw === "string" ? Number(nextVersionRaw) : nextVersionRaw;
+        if (typeof nextVersion !== "number" || !Number.isFinite(nextVersion) || nextVersion < 1) {
+          throw new Error("保存失败：返回版本无效");
+        }
+        persistedVersionRef.current = nextVersion;
+        setPersistedVersion(nextVersion);
+
+        if (saveSeqRef.current === requestId && !persistedSaveQueuedStateRef.current) {
+          pendingSaveRef.current = false;
+          persistedSavePausedRef.current = false;
+          setPersistedSavePaused(false);
+          setSaveConflict(null);
+          setSaveConflictCopyError(null);
+          setSaveConflictCopying(false);
+          setSaveStatus("saved");
+          setSaveError(null);
+          track("mindmap_saved", { mindmapId: persistedMindmapId });
+        }
+        return;
       }
 
-      if (saveSeqRef.current === requestId && !persistedSaveQueuedBodyRef.current) {
-        pendingSaveRef.current = false;
-        persistedSavePausedRef.current = false;
-        setPersistedSavePaused(false);
-        setSaveStatus("saved");
-        setSaveError(null);
-        track("mindmap_saved", { mindmapId: persistedMindmapId });
+      if (res.status === 409 && json && json.ok === false && json.code === "VERSION_CONFLICT") {
+        const serverVersionRaw = json.serverVersion;
+        const serverVersion =
+          typeof serverVersionRaw === "string" ? Number(serverVersionRaw) : serverVersionRaw;
+        if (
+          typeof serverVersion !== "number" ||
+          !Number.isFinite(serverVersion) ||
+          serverVersion < 1
+        ) {
+          throw new Error("保存失败：冲突版本无效");
+        }
+
+        if (saveSeqRef.current === requestId) {
+          if (!persistedSaveQueuedStateRef.current) {
+            persistedSaveQueuedStateRef.current = queuedState;
+          }
+          pendingSaveRef.current = true;
+          persistedSavePausedRef.current = true;
+          setPersistedSavePaused(true);
+          setSaveConflict({ serverVersion });
+          setSaveConflictCopyError(null);
+          setSaveConflictCopying(false);
+          setSaveStatus("conflict");
+          setSaveError(null);
+        }
+        return;
       }
+
+      throw new Error(
+        (json && "message" in json && typeof json.message === "string" && json.message) ||
+          `保存失败（${res.status}）`,
+      );
     } catch (err) {
       if (saveSeqRef.current === requestId) {
-        if (!persistedSaveQueuedBodyRef.current) {
-          persistedSaveQueuedBodyRef.current = body;
+        if (!persistedSaveQueuedStateRef.current) {
+          persistedSaveQueuedStateRef.current = queuedState;
         }
         pendingSaveRef.current = true;
         persistedSavePausedRef.current = true;
@@ -554,7 +630,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
       }
     } finally {
       persistedSaveInFlightRef.current = false;
-      if (persistedSaveQueuedBodyRef.current && !persistedSavePausedRef.current) {
+      if (persistedSaveQueuedStateRef.current && !persistedSavePausedRef.current) {
         void flushPersistedSave();
       }
     }
@@ -567,10 +643,13 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
     persistedSavePausedRef.current = false;
     setPersistedSavePaused(false);
+    setSaveConflict(null);
+    setSaveConflictCopyError(null);
+    setSaveConflictCopying(false);
     setSaveStatus("saving");
     setSaveError(null);
     pendingSaveRef.current = true;
-    persistedSaveQueuedBodyRef.current = JSON.stringify({ state: current });
+    persistedSaveQueuedStateRef.current = current;
     void flushPersistedSave();
   }, [flushPersistedSave, persistedMindmapId]);
 
@@ -592,6 +671,85 @@ export function MindmapEditor(props: MindmapEditorProps) {
     }
   }, [saveError]);
 
+  const onLoadLatestAfterConflict = useCallback(() => {
+    if (!persistedMindmapId) return;
+    setSaveConflict(null);
+    setSaveConflictCopyError(null);
+    setSaveConflictCopying(false);
+    persistedSaveQueuedStateRef.current = null;
+    pendingSaveRef.current = false;
+    setSaveStatus("loading");
+    setPersistedReloadSeq((seq) => seq + 1);
+  }, [persistedMindmapId]);
+
+  const onOverwriteAfterConflict = useCallback(async () => {
+    if (!persistedMindmapId) return;
+    const current = stateRef.current;
+    if (!current || !saveConflict) return;
+
+    setSaveConflict(null);
+    setSaveConflictCopyError(null);
+    setSaveConflictCopying(false);
+    persistedVersionRef.current = saveConflict.serverVersion;
+    setPersistedVersion(saveConflict.serverVersion);
+
+    persistedSavePausedRef.current = false;
+    setPersistedSavePaused(false);
+    setSaveStatus("saving");
+    setSaveError(null);
+    pendingSaveRef.current = true;
+    persistedSaveQueuedStateRef.current = current;
+    await flushPersistedSave();
+  }, [flushPersistedSave, persistedMindmapId, saveConflict]);
+
+  const onSaveAsCopyAfterConflict = useCallback(async () => {
+    if (!persistedMindmapId) return;
+    const current = stateRef.current;
+    if (!current) return;
+
+    setSaveConflictCopying(true);
+    setSaveConflictCopyError(null);
+
+    const collapsedNodeIdsToSave = Array.from(collapsedNodeIds)
+      .filter((id) => Boolean(current.nodesById[id]))
+      .sort();
+    const selectedNodeIdToSave =
+      selectedNodeId && current.nodesById[selectedNodeId] ? selectedNodeId : current.rootNodeId;
+
+    try {
+      const res = await fetch("/api/mindmaps/import-try", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          source: "copy",
+          draft: current,
+          ui: {
+            collapsedNodeIds: collapsedNodeIdsToSave,
+            selectedNodeId: selectedNodeIdToSave,
+            viewport,
+          },
+        }),
+      });
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true; mindmapId: string }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
+        throw new Error((json && "message" in json && json.message) || `另存失败（${res.status}）`);
+      }
+
+      setSaveConflict(null);
+      setSaveConflictCopying(false);
+      router.push(`/mindmaps/${json.mindmapId}`);
+      router.refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "另存失败";
+      setSaveConflictCopyError(message);
+      setSaveConflictCopying(false);
+    }
+  }, [collapsedNodeIds, persistedMindmapId, router, selectedNodeId, viewport]);
+
   useEffect(() => {
     if (!persistedMindmapId) return;
     if (!state) return;
@@ -612,8 +770,8 @@ export function MindmapEditor(props: MindmapEditorProps) {
       setSaveError(null);
     }
 
-    saveTimerRef.current = setTimeout(async () => {
-      persistedSaveQueuedBodyRef.current = JSON.stringify({ state });
+    saveTimerRef.current = setTimeout(() => {
+      persistedSaveQueuedStateRef.current = state;
       if (persistedSavePausedRef.current) return;
       void flushPersistedSave();
     }, 500);
@@ -726,9 +884,11 @@ export function MindmapEditor(props: MindmapEditorProps) {
       if (!pendingSaveRef.current) return;
       const current = stateRef.current;
       if (!current) return;
+      const baseVersion = persistedVersionRef.current;
+      if (!baseVersion) return;
 
       const url = `/api/mindmaps/${persistedMindmapId}/save`;
-      const body = JSON.stringify({ state: current });
+      const body = JSON.stringify({ state: current, baseVersion });
 
       try {
         const blob = new Blob([body], { type: "application/json" });
@@ -1583,6 +1743,8 @@ export function MindmapEditor(props: MindmapEditorProps) {
         return "已保存";
       case "error":
         return "出错";
+      case "conflict":
+        return "冲突";
       case "idle":
       default:
         return "就绪";
@@ -2127,6 +2289,16 @@ export function MindmapEditor(props: MindmapEditorProps) {
           onImport={() => void onImportTryDraft()}
           onStartBlank={() => void onStartBlankMindmapFromTryDraft()}
           updatedAt={initialTryDraft.updatedAt}
+        />
+      ) : null}
+
+      {persistedMindmapId && saveConflict ? (
+        <MindmapSaveConflictModal
+          busy={saveConflictCopying}
+          error={saveConflictCopyError}
+          onLoadLatest={onLoadLatestAfterConflict}
+          onOverwrite={() => void onOverwriteAfterConflict()}
+          onSaveAsCopy={() => void onSaveAsCopyAfterConflict()}
         />
       ) : null}
     </main>

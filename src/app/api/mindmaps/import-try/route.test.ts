@@ -35,7 +35,7 @@ describe("/api/mindmaps/import-try route", () => {
     const supabase = createSupabaseMock({ userId: "u1" });
     supabase.__setQueryHandler("mindmaps.insert", async () => ({ data: null, error: null }));
     supabase.__setRpcHandler("mma_replace_mindmap_nodes", async () => ({
-      data: null,
+      data: { ok: true, version: 2 },
       error: null,
     }));
     supabase.__setQueryHandler("mindmap_ui_state.upsert", async () => ({

@@ -22,7 +22,15 @@ export async function POST(
 
   const respond = (
     status: number,
-    payload: { ok: true } | { ok: false; message: string; code?: string; detail?: string },
+    payload:
+      | { ok: true; version: number }
+      | {
+          ok: false;
+          message: string;
+          code?: string;
+          detail?: string;
+          serverVersion?: number;
+        },
   ) => {
     logApi(
       {
@@ -99,23 +107,73 @@ export async function POST(
     order_index: r.order_index,
   }));
 
-  const { error: rpcError } = await supabase.rpc("mma_replace_mindmap_nodes", {
+  const { data: rpcData, error: rpcError } = await supabase.rpc("mma_replace_mindmap_nodes", {
     p_mindmap_id: mindmapId,
     p_root_node_id: mindmap.root_node_id,
     p_title: inferredTitle,
     p_nodes: rpcNodes,
+    p_base_version: parsed.data.baseVersion,
   });
 
-  if (!rpcError) {
-    return respond(200, { ok: true });
+  if (rpcError) {
+    if (isMissingAtomicSaveRpc(rpcError)) {
+      return respond(503, {
+        ok: false,
+        code: "PERSISTENCE_UNAVAILABLE",
+        message: "保存能力不可用：原子保存 RPC 缺失。请先应用 Supabase migrations。",
+        detail: rpcError.message,
+      });
+    }
+
+    return respond(500, {
+      ok: false,
+      code: "SAVE_FAILED",
+      message: "Failed to save mindmap nodes",
+      detail: rpcError.message,
+    });
   }
 
-  if (isMissingAtomicSaveRpc(rpcError)) {
-    return respond(503, {
+  const normalized = rpcData as unknown;
+  if (!normalized || typeof normalized !== "object" || !("ok" in normalized)) {
+    return respond(500, {
       ok: false,
-      code: "PERSISTENCE_UNAVAILABLE",
-      message: "保存能力不可用：原子保存 RPC 缺失。请先应用 Supabase migrations。",
-      detail: rpcError.message,
+      code: "SAVE_FAILED",
+      message: "Failed to save mindmap nodes",
+      detail: "Invalid RPC response",
+    });
+  }
+
+  if ((normalized as { ok: unknown }).ok === true) {
+    const versionRaw = (normalized as { version?: unknown }).version;
+    const version = typeof versionRaw === "string" ? Number(versionRaw) : versionRaw;
+    if (typeof version !== "number" || !Number.isFinite(version) || version < 1) {
+      return respond(500, {
+        ok: false,
+        code: "SAVE_FAILED",
+        message: "Failed to save mindmap nodes",
+        detail: "Invalid version returned from RPC",
+      });
+    }
+    return respond(200, { ok: true, version });
+  }
+
+  const code = (normalized as { code?: unknown }).code;
+  if (code === "VERSION_CONFLICT") {
+    const versionRaw = (normalized as { version?: unknown }).version;
+    const serverVersion = typeof versionRaw === "string" ? Number(versionRaw) : versionRaw;
+    if (typeof serverVersion !== "number" || !Number.isFinite(serverVersion) || serverVersion < 1) {
+      return respond(500, {
+        ok: false,
+        code: "SAVE_FAILED",
+        message: "Failed to save mindmap nodes",
+        detail: "Invalid serverVersion returned from RPC",
+      });
+    }
+    return respond(409, {
+      ok: false,
+      code: "VERSION_CONFLICT",
+      message: "检测到版本冲突，已阻止覆盖保存。",
+      serverVersion,
     });
   }
 
@@ -123,6 +181,6 @@ export async function POST(
     ok: false,
     code: "SAVE_FAILED",
     message: "Failed to save mindmap nodes",
-    detail: rpcError.message,
+    detail: "Unknown RPC response",
   });
 }
