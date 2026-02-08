@@ -33,7 +33,7 @@ export function getMindmapEditorKeyAction(input: KeybindingInput): MindmapEditor
     return "add_child";
   }
 
-  if (key === "Tab") return "add_sibling";
+  if (key === "Tab" && !input.shiftKey) return "add_sibling";
 
   if (key === "Backspace" || key === "Delete") {
     return "delete_selected";

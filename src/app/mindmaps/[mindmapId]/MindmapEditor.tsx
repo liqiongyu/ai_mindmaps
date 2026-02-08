@@ -141,6 +141,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const historyRef = useRef<History<MindmapState> | null>(history);
   const stateRef = useRef<MindmapState | null>(state);
   const canvasRef = useRef<MindmapCanvasHandle | null>(null);
+  const canvasHotkeysScopeRef = useRef<HTMLDivElement | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSeqRef = useRef(0);
   const skipNextSaveRef = useRef(false);
@@ -891,6 +892,13 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
       const action = getMindmapEditorKeyAction(event);
       if (!action) return;
+
+      if (action === "add_sibling") {
+        const scopeEl = canvasHotkeysScopeRef.current;
+        if (!scopeEl || !(event.target instanceof HTMLElement) || !scopeEl.contains(event.target)) {
+          return;
+        }
+      }
 
       const current = stateRef.current;
       const currentSelectedNodeId = selectedNodeId;
@@ -1846,7 +1854,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
                 导出失败：{exportError}
               </div>
             ) : null}
-            <div className="relative min-h-0 flex-1">
+            <div className="relative min-h-0 flex-1" ref={canvasHotkeysScopeRef}>
               <div className="pointer-events-none absolute top-3 right-3 z-10 rounded-md border border-zinc-200 bg-white/90 px-2 py-1 text-[11px] text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-300">
                 {dragHint}
               </div>

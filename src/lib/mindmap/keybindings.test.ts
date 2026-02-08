@@ -21,7 +21,7 @@ describe("getMindmapEditorKeyAction", () => {
 
   test("maps Tab to add sibling", () => {
     expect(getMindmapEditorKeyAction({ key: "Tab" })).toBe("add_sibling");
-    expect(getMindmapEditorKeyAction({ key: "Tab", shiftKey: true })).toBe("add_sibling");
+    expect(getMindmapEditorKeyAction({ key: "Tab", shiftKey: true })).toBeNull();
   });
 
   test("maps Delete/Backspace to delete selected", () => {
