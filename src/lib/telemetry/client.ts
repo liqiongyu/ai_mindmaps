@@ -16,12 +16,25 @@ let cachedSessionId: string | null = null;
 let queue: PendingEvent[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let flushing = false;
+let fallbackCounter = 0;
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 function createId(prefix: string): string {
-  const random = globalThis.crypto?.randomUUID?.();
-  return random
-    ? `${prefix}_${random}`
-    : `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const randomUUID = globalThis.crypto?.randomUUID?.();
+  if (randomUUID) return `${prefix}_${randomUUID}`;
+
+  try {
+    const bytes = globalThis.crypto?.getRandomValues?.(new Uint8Array(16));
+    if (bytes) return `${prefix}_${bytesToHex(bytes)}`;
+  } catch {
+    // Ignore and fallback to a monotonic id.
+  }
+
+  fallbackCounter += 1;
+  return `${prefix}_${Date.now()}_${fallbackCounter}`;
 }
 
 export function getSessionId(): string {
