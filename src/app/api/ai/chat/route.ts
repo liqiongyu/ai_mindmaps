@@ -360,6 +360,89 @@ export async function POST(request: Request) {
     return respondError(404, "MINDMAP_NOT_FOUND", "Mindmap not found");
   }
 
+  if (providedOutput) {
+    const provider = providedOutput.provider ?? null;
+    const modelName = providedOutput.model ?? null;
+
+    const normalized = normalizeAiMindmapOperationIds({
+      state: { rootNodeId: mindmap.root_node_id, nodesById: {} },
+      operations: providedOutput.operations,
+    });
+    if (!normalized.ok) {
+      return respondError(400, "PROVIDED_OUTPUT_INVALID", normalized.message);
+    }
+
+    if (JSON.stringify(normalized.operations) !== JSON.stringify(providedOutput.operations)) {
+      return respondError(
+        400,
+        "PROVIDED_OUTPUT_NOT_NORMALIZED",
+        "providedOutput.operations must already be normalized UUID ops",
+      );
+    }
+
+    for (const op of normalized.operations) {
+      if (op.type === "delete_node" && op.nodeId === mindmap.root_node_id) {
+        return respondError(400, "ROOT_NODE_OPERATION", "Cannot delete root node");
+      }
+      if (op.type === "move_node" && op.nodeId === mindmap.root_node_id) {
+        return respondError(400, "ROOT_NODE_OPERATION", "Cannot move root node");
+      }
+    }
+
+    const changeSummary = summarizeOperations(normalized.operations);
+    const nodeId = scope === "node" ? (selectedNodeId ?? null) : null;
+    const threadIdResult = await getOrCreateThreadId({ supabase, mindmapId, scope, nodeId });
+
+    let chatPersisted = false;
+    if (threadIdResult.ok) {
+      const { error: insertError } = await supabase.from("chat_messages").insert([
+        {
+          thread_id: threadIdResult.threadId,
+          role: "user",
+          content: userMessage,
+          operations: null,
+          provider: null,
+          model: null,
+        },
+        {
+          thread_id: threadIdResult.threadId,
+          role: "assistant",
+          content: providedOutput.assistant_message,
+          operations: normalized.operations,
+          provider,
+          model: modelName,
+        },
+      ]);
+
+      if (!insertError) {
+        chatPersisted = true;
+      } else if (!isMissingChatPersistenceSchema(insertError)) {
+        return respondError(
+          500,
+          "CHAT_PERSIST_MESSAGES_FAILED",
+          "Failed to persist chat messages",
+          {
+            detail: insertError.message,
+          },
+        );
+      }
+    } else if (!threadIdResult.missingSchema) {
+      return respondError(500, "CHAT_PERSIST_THREAD_FAILED", "Failed to persist chat thread", {
+        detail: threadIdResult.message,
+      });
+    }
+
+    return respondOk({
+      assistant_message: providedOutput.assistant_message,
+      operations: normalized.operations,
+      provider,
+      model: modelName,
+      dryRun: false,
+      changeSummary,
+      persistence: { chatPersisted },
+    });
+  }
+
   const { data: nodeRows, error: nodesError } = await supabase
     .from("mindmap_nodes")
     .select("id,parent_id,text,notes,order_index")
@@ -382,196 +465,170 @@ export async function POST(request: Request) {
   let modelName: string | null = null;
   let modelOutput: z.infer<typeof AiChatModelOutputSchema> | null = null;
 
-  if (providedOutput) {
-    provider = providedOutput.provider ?? null;
-    modelName = providedOutput.model ?? null;
+  const constraintsInstructionBlock = buildAiChatConstraintsInstructionBlock(constraints);
+  const outputLanguageInstruction =
+    constraints.outputLanguage === "zh"
+      ? "assistant_message MUST be in Chinese."
+      : "assistant_message MUST be in English.";
 
-    const normalized = normalizeAiMindmapOperationIds({
-      state,
-      operations: providedOutput.operations,
-    });
-    if (!normalized.ok) {
-      return respondError(400, "PROVIDED_OUTPUT_INVALID", normalized.message);
-    }
+  const instructions = [
+    "You edit a mindmap by returning JSON ops.",
+    "Return ONLY a single JSON object (no markdown, no code fences).",
+    "assistant_message should be concise (<= 2 sentences).",
+    outputLanguageInstruction,
+    "",
+    "Output schema:",
+    '{ "assistant_message": string, "operations": Operation[] }',
+    "",
+    "Operation types:",
+    '- add_node: { type: \"add_node\", nodeId, parentId, text, index? }',
+    '- rename_node: { type: \"rename_node\", nodeId, text }',
+    '- update_notes: { type: \"update_notes\", nodeId, notes }',
+    '- move_node: { type: \"move_node\", nodeId, newParentId, index? }',
+    '- delete_node: { type: \"delete_node\", nodeId }',
+    '- reorder_children: { type: \"reorder_children\", parentId, orderedChildIds }',
+    "",
+    constraintsInstructionBlock,
+    "",
+    "Rules:",
+    "- Do not delete or move the root node.",
+    constraints.allowDelete
+      ? "- You MAY delete nodes if explicitly requested by the user (never delete the root node)."
+      : "- Do not delete nodes (do not output delete_node).",
+    constraints.allowMove
+      ? "- You MAY move or reorder nodes when it improves clarity."
+      : "- Do not move or reorder nodes (do not output move_node or reorder_children).",
+    `- When adding new nodes, aim for about ${constraints.branchCount} branches and depth up to ${constraints.depth} levels for newly added content.`,
+    "- Reference existing nodes by their id.",
+    '- For add_node, set nodeId to a UNIQUE temporary id (e.g. "n1", "n2"). The system will replace it with a UUID.',
+    "- If uncertain, set operations to [] and ask a clarifying question in assistant_message.",
+    scope === "node"
+      ? "- Node scope: only modify the selected node subtree; new nodes must be added under allowed parents."
+      : "- Global scope: you may modify any nodes in the mindmap.",
+  ].join("\n");
 
-    if (JSON.stringify(normalized.operations) !== JSON.stringify(providedOutput.operations)) {
+  let mindmapContext = "";
+  try {
+    mindmapContext = buildAiChatMindmapContext({ state, scope, selectedNodeId });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Unknown error";
+    if (scope === "node" && isNodeNotFoundError(detail)) {
       return respondError(
-        400,
-        "PROVIDED_OUTPUT_NOT_NORMALIZED",
-        "providedOutput.operations must already be normalized UUID ops",
+        409,
+        "CONTEXT_NODE_OUT_OF_SYNC",
+        "Selected node is out of sync. Please wait for auto-save and retry.",
+        { detail },
       );
     }
+    return respondError(500, "CONTEXT_BUILD_FAILED", "Failed to build AI context", { detail });
+  }
 
-    modelOutput = {
-      assistant_message: providedOutput.assistant_message,
-      operations: normalized.operations,
-    };
-  } else {
-    const constraintsInstructionBlock = buildAiChatConstraintsInstructionBlock(constraints);
-    const outputLanguageInstruction =
-      constraints.outputLanguage === "zh"
-        ? "assistant_message MUST be in Chinese."
-        : "assistant_message MUST be in English.";
+  const input = [
+    "Return valid json only.",
+    `Scope: ${scope}`,
+    "",
+    mindmapContext,
+    "",
+    "User message:",
+    userMessage,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-    const instructions = [
-      "You edit a mindmap by returning JSON ops.",
-      "Return ONLY a single JSON object (no markdown, no code fences).",
-      "assistant_message should be concise (<= 2 sentences).",
-      outputLanguageInstruction,
-      "",
-      "Output schema:",
-      '{ "assistant_message": string, "operations": Operation[] }',
-      "",
-      "Operation types:",
-      '- add_node: { type: \"add_node\", nodeId, parentId, text, index? }',
-      '- rename_node: { type: \"rename_node\", nodeId, text }',
-      '- update_notes: { type: \"update_notes\", nodeId, notes }',
-      '- move_node: { type: \"move_node\", nodeId, newParentId, index? }',
-      '- delete_node: { type: \"delete_node\", nodeId }',
-      '- reorder_children: { type: \"reorder_children\", parentId, orderedChildIds }',
-      "",
-      constraintsInstructionBlock,
-      "",
-      "Rules:",
-      "- Do not delete or move the root node.",
-      constraints.allowDelete
-        ? "- You MAY delete nodes if explicitly requested by the user (never delete the root node)."
-        : "- Do not delete nodes (do not output delete_node).",
-      constraints.allowMove
-        ? "- You MAY move or reorder nodes when it improves clarity."
-        : "- Do not move or reorder nodes (do not output move_node or reorder_children).",
-      `- When adding new nodes, aim for about ${constraints.branchCount} branches and depth up to ${constraints.depth} levels for newly added content.`,
-      "- Reference existing nodes by their id.",
-      '- For add_node, set nodeId to a UNIQUE temporary id (e.g. "n1", "n2"). The system will replace it with a UUID.',
-      "- If uncertain, set operations to [] and ask a clarifying question in assistant_message.",
-      scope === "node"
-        ? "- Node scope: only modify the selected node subtree; new nodes must be added under allowed parents."
-        : "- Global scope: you may modify any nodes in the mindmap.",
-    ].join("\n");
+  try {
+    const config = getAzureOpenAIConfigFromEnv(process.env);
+    provider = "azure-openai";
+    modelName = config.model;
+    const client = createAzureOpenAIClient(config);
 
-    let mindmapContext = "";
-    try {
-      mindmapContext = buildAiChatMindmapContext({ state, scope, selectedNodeId });
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : "Unknown error";
-      if (scope === "node" && isNodeNotFoundError(detail)) {
+    const attempts: Array<{ maxOutputTokens: number; extraInstructions?: string }> = [
+      { maxOutputTokens: 4096 },
+      {
+        maxOutputTokens: 8192,
+        extraInstructions:
+          "Your previous output was invalid, truncated, or empty. Return the complete JSON object only.",
+      },
+    ];
+
+    let lastError: unknown = null;
+    for (const attempt of attempts) {
+      try {
+        const response = await client.responses.create({
+          model: config.model,
+          reasoning: { effort: "minimal" },
+          instructions: attempt.extraInstructions
+            ? `${instructions}\n\n${attempt.extraInstructions}`
+            : instructions,
+          input,
+          max_output_tokens: attempt.maxOutputTokens,
+          text: {
+            format: { type: "json_object" },
+            verbosity: "low",
+          },
+        });
+
+        if (
+          response.status === "incomplete" ||
+          response.incomplete_details?.reason === "max_output_tokens"
+        ) {
+          throw new Error("Model response incomplete (max_output_tokens)");
+        }
+
+        const outputText = response.output_text ?? "";
+        if (!outputText.trim()) {
+          throw new Error("Empty model output");
+        }
+
+        const parsedModel = parseFirstJsonObject(outputText);
+        const schemaCheck = AiChatModelOutputSchema.safeParse(parsedModel);
+        if (!schemaCheck.success) {
+          throw schemaCheck.error;
+        }
+
+        const normalized = normalizeAiMindmapOperationIds({
+          state,
+          operations: schemaCheck.data.operations,
+        });
+        if (!normalized.ok) {
+          throw new Error(normalized.message);
+        }
+
+        modelOutput = {
+          ...schemaCheck.data,
+          operations: normalized.operations,
+        };
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!modelOutput) {
+      if (lastError instanceof z.ZodError) {
         return respondError(
-          409,
-          "CONTEXT_NODE_OUT_OF_SYNC",
-          "Selected node is out of sync. Please wait for auto-save and retry.",
-          { detail },
+          502,
+          "MODEL_OUTPUT_SCHEMA_INVALID",
+          "Model output schema validation failed",
+          {
+            issues: lastError.issues,
+          },
         );
       }
-      return respondError(500, "CONTEXT_BUILD_FAILED", "Failed to build AI context", { detail });
-    }
-
-    const input = [
-      "Return valid json only.",
-      `Scope: ${scope}`,
-      "",
-      mindmapContext,
-      "",
-      "User message:",
-      userMessage,
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    try {
-      const config = getAzureOpenAIConfigFromEnv(process.env);
-      provider = "azure-openai";
-      modelName = config.model;
-      const client = createAzureOpenAIClient(config);
-
-      const attempts: Array<{ maxOutputTokens: number; extraInstructions?: string }> = [
-        { maxOutputTokens: 4096 },
-        {
-          maxOutputTokens: 8192,
-          extraInstructions:
-            "Your previous output was invalid, truncated, or empty. Return the complete JSON object only.",
-        },
-      ];
-
-      let lastError: unknown = null;
-      for (const attempt of attempts) {
-        try {
-          const response = await client.responses.create({
-            model: config.model,
-            reasoning: { effort: "minimal" },
-            instructions: attempt.extraInstructions
-              ? `${instructions}\n\n${attempt.extraInstructions}`
-              : instructions,
-            input,
-            max_output_tokens: attempt.maxOutputTokens,
-            text: {
-              format: { type: "json_object" },
-              verbosity: "low",
-            },
-          });
-
-          if (
-            response.status === "incomplete" ||
-            response.incomplete_details?.reason === "max_output_tokens"
-          ) {
-            throw new Error("Model response incomplete (max_output_tokens)");
-          }
-
-          const outputText = response.output_text ?? "";
-          if (!outputText.trim()) {
-            throw new Error("Empty model output");
-          }
-
-          const parsedModel = parseFirstJsonObject(outputText);
-          const schemaCheck = AiChatModelOutputSchema.safeParse(parsedModel);
-          if (!schemaCheck.success) {
-            throw schemaCheck.error;
-          }
-
-          const normalized = normalizeAiMindmapOperationIds({
-            state,
-            operations: schemaCheck.data.operations,
-          });
-          if (!normalized.ok) {
-            throw new Error(normalized.message);
-          }
-
-          modelOutput = {
-            ...schemaCheck.data,
-            operations: normalized.operations,
-          };
-          lastError = null;
-          break;
-        } catch (err) {
-          lastError = err;
-        }
+      const message = lastError instanceof Error ? lastError.message : "Model call failed";
+      if (/empty model output/i.test(message)) {
+        return respondError(502, "MODEL_OUTPUT_EMPTY", "Empty model output");
       }
-
-      if (!modelOutput) {
-        if (lastError instanceof z.ZodError) {
-          return respondError(
-            502,
-            "MODEL_OUTPUT_SCHEMA_INVALID",
-            "Model output schema validation failed",
-            {
-              issues: lastError.issues,
-            },
-          );
-        }
-        const message = lastError instanceof Error ? lastError.message : "Model call failed";
-        if (/empty model output/i.test(message)) {
-          return respondError(502, "MODEL_OUTPUT_EMPTY", "Empty model output");
-        }
-        if (/incomplete/i.test(message) || /max_output_tokens/i.test(message)) {
-          return respondError(502, "MODEL_OUTPUT_TRUNCATED", "Model output truncated");
-        }
-        return respondError(502, "MODEL_OUTPUT_INVALID", "Invalid model output", {
-          detail: message,
-        });
+      if (/incomplete/i.test(message) || /max_output_tokens/i.test(message)) {
+        return respondError(502, "MODEL_OUTPUT_TRUNCATED", "Model output truncated");
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Model call failed";
-      return respondError(502, "PROVIDER_ERROR", "AI provider error", { detail: message });
+      return respondError(502, "MODEL_OUTPUT_INVALID", "Invalid model output", {
+        detail: message,
+      });
     }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Model call failed";
+    return respondError(502, "PROVIDER_ERROR", "AI provider error", { detail: message });
   }
 
   if (!modelOutput) {
