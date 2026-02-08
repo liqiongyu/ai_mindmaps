@@ -8,6 +8,7 @@ import { MindmapChatSidebar } from "./MindmapChatSidebar";
 import { MindmapCanvas, type MindmapCanvasHandle } from "./MindmapCanvas";
 import { MindmapNodeInspectorModal } from "./MindmapNodeInspectorModal";
 
+import { TryDraftImportModal, type TryDraftImportAction } from "@/app/try/TryDraftImportModal";
 import type { MindmapState, Operation } from "@/lib/mindmap/ops";
 import { applyOperations } from "@/lib/mindmap/ops";
 import { makeMindmapExportFilename } from "@/lib/mindmap/export";
@@ -32,6 +33,7 @@ import {
   stringifyTryDraft,
   TRY_DRAFT_STORAGE_KEY,
 } from "@/lib/mindmap/tryDraft";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type EditorActionResult =
   | { ok: true; nextState: MindmapState; nextSelectedNodeId: string | null }
@@ -127,7 +129,13 @@ export function MindmapEditor(props: MindmapEditorProps) {
     if (props.mode !== "try") return null;
     return initialTryDraft?.ui.viewport ?? null;
   });
+  const [authedUserId, setAuthedUserId] = useState<string | null>(null);
+  const [tryDraftImportOpen, setTryDraftImportOpen] = useState(false);
+  const [tryDraftImportDismissed, setTryDraftImportDismissed] = useState(false);
+  const [tryDraftImportAction, setTryDraftImportAction] = useState<TryDraftImportAction>(null);
+  const [tryDraftImportError, setTryDraftImportError] = useState<string | null>(null);
 
+  const tryDraftPersistenceDisabledRef = useRef(false);
   const inspectorOpenRef = useRef(inspectorOpen);
   const historyRef = useRef<History<MindmapState> | null>(history);
   const stateRef = useRef<MindmapState | null>(state);
@@ -214,6 +222,44 @@ export function MindmapEditor(props: MindmapEditorProps) {
   useEffect(() => {
     inspectorOpenRef.current = inspectorOpen;
   }, [inspectorOpen]);
+
+  useEffect(() => {
+    if (props.mode !== "try") return;
+
+    const supabase = createSupabaseBrowserClient();
+    let cancelled = false;
+
+    void supabase.auth.getUser().then(({ data, error }) => {
+      if (cancelled) return;
+      if (error || !data.user) {
+        setAuthedUserId(null);
+        return;
+      }
+      setAuthedUserId(data.user.id);
+    });
+
+    const { data: authSubscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return;
+      setAuthedUserId(session?.user?.id ?? null);
+    });
+
+    return () => {
+      cancelled = true;
+      authSubscription.subscription.unsubscribe();
+    };
+  }, [props.mode]);
+
+  useEffect(() => {
+    if (props.mode !== "try") return;
+    if (!authedUserId) return;
+    if (!initialTryDraft) return;
+    if (tryDraftImportDismissed) return;
+    if (tryDraftImportOpen) return;
+
+    setTryDraftImportError(null);
+    setTryDraftImportAction(null);
+    setTryDraftImportOpen(true);
+  }, [authedUserId, initialTryDraft, props.mode, tryDraftImportDismissed, tryDraftImportOpen]);
 
   useEffect(() => {
     if (!state) return;
@@ -527,6 +573,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   useEffect(() => {
     if (props.mode !== "try") return;
     if (!state) return;
+    if (tryDraftPersistenceDisabledRef.current) return;
 
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
@@ -622,6 +669,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
     if (props.mode !== "try") return;
 
     const flush = () => {
+      if (tryDraftPersistenceDisabledRef.current) return;
       if (!pendingSaveRef.current) return;
       const json = tryDraftJsonRef.current;
       if (!json) return;
@@ -1250,6 +1298,106 @@ export function MindmapEditor(props: MindmapEditorProps) {
     [persistedMindmapId],
   );
 
+  const onOpenTryDraftImport = useCallback(() => {
+    setTryDraftImportError(null);
+    setTryDraftImportDismissed(false);
+    setTryDraftImportOpen(true);
+  }, []);
+
+  const stopTryDraftPersistenceAndClear = useCallback(() => {
+    tryDraftPersistenceDisabledRef.current = true;
+    pendingSaveRef.current = false;
+    tryDraftJsonRef.current = null;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    try {
+      localStorage.removeItem(TRY_DRAFT_STORAGE_KEY);
+    } catch {}
+  }, []);
+
+  const onImportTryDraft = useCallback(async () => {
+    const current = stateRef.current;
+    if (!current) return;
+
+    setTryDraftImportAction("import");
+    setTryDraftImportError(null);
+
+    try {
+      const uiPayload = {
+        collapsedNodeIds: Array.from(collapsedNodeIds),
+        selectedNodeId,
+        viewport,
+      };
+      const res = await fetch("/api/mindmaps/import-try", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: "try", draft: current, ui: uiPayload }),
+      });
+
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true; mindmapId: string }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
+        throw new Error((json && "message" in json && json.message) || `导入失败（${res.status}）`);
+      }
+
+      stopTryDraftPersistenceAndClear();
+      setTryDraftImportOpen(false);
+      router.push(`/mindmaps/${json.mindmapId}`);
+      router.refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "导入失败";
+      setTryDraftImportError(message);
+    } finally {
+      setTryDraftImportAction(null);
+    }
+  }, [collapsedNodeIds, router, selectedNodeId, stopTryDraftPersistenceAndClear, viewport]);
+
+  const onStartBlankMindmapFromTryDraft = useCallback(async () => {
+    setTryDraftImportAction("blank");
+    setTryDraftImportError(null);
+
+    try {
+      const res = await fetch("/api/mindmaps", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true; mindmapId: string }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
+        throw new Error((json && "message" in json && json.message) || `创建失败（${res.status}）`);
+      }
+
+      stopTryDraftPersistenceAndClear();
+      setTryDraftImportOpen(false);
+      router.push(`/mindmaps/${json.mindmapId}`);
+      router.refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "创建失败";
+      setTryDraftImportError(message);
+    } finally {
+      setTryDraftImportAction(null);
+    }
+  }, [router, stopTryDraftPersistenceAndClear]);
+
+  const onDiscardTryDraft = useCallback(() => {
+    setTryDraftImportAction("discard");
+    setTryDraftImportError(null);
+    stopTryDraftPersistenceAndClear();
+    setTryDraftImportOpen(false);
+    router.push("/mindmaps");
+    router.refresh();
+    setTryDraftImportAction(null);
+  }, [router, stopTryDraftPersistenceAndClear]);
+
   const onExport = useCallback(
     async (format: "png" | "svg") => {
       const canvas = canvasRef.current;
@@ -1319,20 +1467,53 @@ export function MindmapEditor(props: MindmapEditorProps) {
     <main className="flex min-h-screen flex-col">
       {props.mode === "try" ? (
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-300">
-          <div>你正在试玩本地草稿。登录后可使用 AI 与云端保存。</div>
+          <div>
+            {!authedUserId
+              ? "你正在试玩本地草稿。登录后可使用 AI 与云端保存。"
+              : initialTryDraft
+                ? "检测到你的试玩草稿。导入到云端后可继续编辑并使用 AI。"
+                : "你正在试玩。回到我的导图以开始云端编辑。"}
+          </div>
           <div className="flex items-center gap-2">
-            <Link
-              className="rounded-md bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-              href="/login"
-            >
-              登录
-            </Link>
-            <Link
-              className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] font-medium hover:bg-white dark:border-zinc-800 dark:hover:bg-zinc-900"
-              href="/signup"
-            >
-              注册
-            </Link>
+            {!authedUserId ? (
+              <>
+                <Link
+                  className="rounded-md bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                  href="/login?next=/try"
+                >
+                  登录
+                </Link>
+                <Link
+                  className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] font-medium hover:bg-white dark:border-zinc-800 dark:hover:bg-zinc-900"
+                  href="/signup?next=/try"
+                >
+                  注册
+                </Link>
+              </>
+            ) : initialTryDraft ? (
+              <>
+                <button
+                  className="rounded-md bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                  onClick={onOpenTryDraftImport}
+                  type="button"
+                >
+                  导入草稿
+                </button>
+                <Link
+                  className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] font-medium hover:bg-white dark:border-zinc-800 dark:hover:bg-zinc-900"
+                  href="/mindmaps"
+                >
+                  回到我的导图
+                </Link>
+              </>
+            ) : (
+              <Link
+                className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] font-medium hover:bg-white dark:border-zinc-800 dark:hover:bg-zinc-900"
+                href="/mindmaps"
+              >
+                回到我的导图
+              </Link>
+            )}
           </div>
         </div>
       ) : null}
@@ -1677,18 +1858,45 @@ export function MindmapEditor(props: MindmapEditorProps) {
               </div>
               <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
                 <div className="flex gap-2">
-                  <Link
-                    className="flex-1 rounded-md bg-zinc-900 px-3 py-2 text-center text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                    href="/login"
-                  >
-                    登录
-                  </Link>
-                  <Link
-                    className="flex-1 rounded-md border border-zinc-200 px-3 py-2 text-center text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-                    href="/signup"
-                  >
-                    注册
-                  </Link>
+                  {!authedUserId ? (
+                    <>
+                      <Link
+                        className="flex-1 rounded-md bg-zinc-900 px-3 py-2 text-center text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                        href="/login?next=/try"
+                      >
+                        登录
+                      </Link>
+                      <Link
+                        className="flex-1 rounded-md border border-zinc-200 px-3 py-2 text-center text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+                        href="/signup?next=/try"
+                      >
+                        注册
+                      </Link>
+                    </>
+                  ) : initialTryDraft ? (
+                    <>
+                      <button
+                        className="flex-1 rounded-md bg-zinc-900 px-3 py-2 text-center text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                        onClick={onOpenTryDraftImport}
+                        type="button"
+                      >
+                        导入草稿
+                      </button>
+                      <Link
+                        className="flex-1 rounded-md border border-zinc-200 px-3 py-2 text-center text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+                        href="/mindmaps"
+                      >
+                        回到列表
+                      </Link>
+                    </>
+                  ) : (
+                    <Link
+                      className="flex-1 rounded-md border border-zinc-200 px-3 py-2 text-center text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+                      href="/mindmaps"
+                    >
+                      回到我的导图
+                    </Link>
+                  )}
                 </div>
               </div>
             </aside>
@@ -1703,6 +1911,21 @@ export function MindmapEditor(props: MindmapEditorProps) {
           nodeId={selectedNodeId}
           onClose={() => setInspectorOpen(false)}
           onSave={onSaveNodeDetails}
+        />
+      ) : null}
+
+      {props.mode === "try" && authedUserId && initialTryDraft && tryDraftImportOpen ? (
+        <TryDraftImportModal
+          action={tryDraftImportAction}
+          error={tryDraftImportError}
+          onClose={() => {
+            setTryDraftImportOpen(false);
+            setTryDraftImportDismissed(true);
+          }}
+          onDiscard={onDiscardTryDraft}
+          onImport={() => void onImportTryDraft()}
+          onStartBlank={() => void onStartBlankMindmapFromTryDraft()}
+          updatedAt={initialTryDraft.updatedAt}
         />
       ) : null}
     </main>
