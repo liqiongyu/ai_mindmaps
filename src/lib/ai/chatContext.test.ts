@@ -26,11 +26,14 @@ describe("ai/chatContext", () => {
   test("global context is slimmer than full pretty JSON", () => {
     const state = makeStarMindmap(300);
 
-    const slim = buildAiChatMindmapContext({
+    const result = buildAiChatMindmapContext({
       state,
       scope: "global",
       largeMindmapThreshold: 300,
     });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok context");
+    const slim = result.context;
 
     const pretty = JSON.stringify(
       {
@@ -59,12 +62,15 @@ describe("ai/chatContext", () => {
       },
     };
 
-    const ctx = buildAiChatMindmapContext({
+    const result = buildAiChatMindmapContext({
       state,
       scope: "node",
       selectedNodeId: "a",
       largeMindmapThreshold: 300,
     });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok context");
+    const ctx = result.context;
 
     expect(ctx).toContain("Selected node: (a) A");
     expect(ctx).toContain("Path (root -> selected):");
@@ -78,5 +84,39 @@ describe("ai/chatContext", () => {
     expect(ctx).toContain("Selected node notes");
     expect(ctx).toContain("hello notes");
     expect(ctx).not.toContain("- (b1) B1");
+  });
+
+  test("node scope context trims large sibling lists", () => {
+    const state = makeStarMindmap(500);
+
+    const result = buildAiChatMindmapContext({
+      state,
+      scope: "node",
+      selectedNodeId: "n1",
+      largeMindmapThreshold: 300,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok context");
+    expect(result.context).toContain("Siblings (same parent):");
+    expect(result.context).toContain("more siblings");
+    expect(result.context).not.toContain("(n499)");
+  });
+
+  test("returns context_too_large when budget is too small", () => {
+    const state = makeStarMindmap(300);
+
+    const result = buildAiChatMindmapContext({
+      state,
+      scope: "global",
+      largeMindmapThreshold: 0,
+      budget: { maxChars: 200, minLines: 200 },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected context_too_large");
+    expect(result.code).toBe("context_too_large");
+    expect(result.hints.length).toBeGreaterThan(0);
+    expect(result.meta.budget.maxChars).toBe(200);
   });
 });
