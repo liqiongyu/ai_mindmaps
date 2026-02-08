@@ -22,6 +22,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
   type ForwardedRef,
 } from "react";
 
@@ -201,6 +202,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance<MindmapCanvasNode> | null>(null);
   const draggingRef = useRef(false);
+  const [dragging, setDragging] = useState(false);
 
   const flowGraph = useMemo(
     () => mindmapStateToFlow(state, { collapsedNodeIds }),
@@ -242,7 +244,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
 
   useEffect(() => {
-    if (draggingRef.current) return;
+    if (dragging) return;
     setNodes((current) => {
       const currentById = new Map(current.map((node) => [node.id, node]));
       return layoutNodes.map((layoutNode) => {
@@ -260,7 +262,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
         };
       });
     });
-  }, [layoutNodes, setNodes]);
+  }, [dragging, layoutNodes, setNodes]);
 
   useEffect(() => {
     setNodes((current) =>
@@ -376,6 +378,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
   const onNodeDragStart = useCallback(
     (_event: unknown, node: Node) => {
       draggingRef.current = true;
+      setDragging(true);
       onSelectNodeId(node.id);
       setNodes((current) =>
         current.map((n) =>
@@ -383,17 +386,18 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
         ),
       );
     },
-    [onSelectNodeId, setNodes],
+    [onSelectNodeId, setNodes, setDragging],
   );
 
   const onNodeDragStop = useCallback(
     (_event: unknown, node: Node) => {
       draggingRef.current = false;
+      setDragging(false);
       if (!editable) return;
       if (node.id === state.rootNodeId) return;
       onPersistNodePosition?.({ nodeId: node.id, x: node.position.x, y: node.position.y });
     },
-    [editable, onPersistNodePosition, state.rootNodeId],
+    [editable, onPersistNodePosition, setDragging, state.rootNodeId],
   );
 
   const onPaneClick = useCallback(() => {
