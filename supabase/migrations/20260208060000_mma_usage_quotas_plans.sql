@@ -63,20 +63,9 @@ for select
 to authenticated
 using (owner_id = auth.uid());
 
+-- No direct writes from clients. Mutations are only allowed via `mma_consume_quota`.
 drop policy if exists "Usage counters: owner can insert" on public.usage_counters;
-create policy "Usage counters: owner can insert"
-on public.usage_counters
-for insert
-to authenticated
-with check (owner_id = auth.uid());
-
 drop policy if exists "Usage counters: owner can update" on public.usage_counters;
-create policy "Usage counters: owner can update"
-on public.usage_counters
-for update
-to authenticated
-using (owner_id = auth.uid())
-with check (owner_id = auth.uid());
 
 create or replace function public.mma_consume_quota(
   p_metric text,
@@ -95,7 +84,7 @@ returns table (
   reset_at timestamptz
 )
 language plpgsql
-security invoker
+security definer
 set search_path = public
 as $$
 declare
