@@ -34,6 +34,10 @@ function isUniqueViolation(error: { code?: string }): boolean {
   return error.code === "23505";
 }
 
+function isNodeNotFoundError(message: string): boolean {
+  return /^Node not found:/i.test(message);
+}
+
 const MindmapNodeRowSchema = z.object({
   id: z.string(),
   parent_id: z.string().nullable(),
@@ -358,10 +362,23 @@ export async function POST(request: Request) {
     mindmapContext = buildAiChatMindmapContext({ state, scope, selectedNodeId });
   } catch (err) {
     const detail = err instanceof Error ? err.message : "Unknown error";
+    if (scope === "node" && isNodeNotFoundError(detail)) {
+      return jsonError(409, "Selected node is out of sync. Please wait for auto-save and retry.", {
+        detail,
+      });
+    }
     return jsonError(500, "Failed to build AI context", { detail });
   }
 
-  const input = [`Scope: ${scope}`, "", mindmapContext, "", "User message:", userMessage]
+  const input = [
+    "Return valid json only.",
+    `Scope: ${scope}`,
+    "",
+    mindmapContext,
+    "",
+    "User message:",
+    userMessage,
+  ]
     .filter(Boolean)
     .join("\n");
 
