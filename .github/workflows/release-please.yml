@@ -1,4 +1,4 @@
-name: Release Please
+name: Release Please PR
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   release-please:
-    name: Release Please
+    name: Release Please PR
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -32,3 +32,56 @@ jobs:
         with:
           release-type: node
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          target-branch: main
+          skip-github-release: true
+
+      - name: Keep release PR up to date and auto-merge enabled
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          pr_json="$(gh pr list \
+            --repo "${REPO}" \
+            --state open \
+            --base main \
+            --json number,headRefName,author,autoMergeRequest \
+            --jq '[.[] | select((.headRefName | startswith("release-please--")) and (.author.login == "app/github-actions" or .author.login == "github-actions[bot]"))] | sort_by(.number) | last')"
+
+          if [ -z "${pr_json}" ] || [ "${pr_json}" = "null" ]; then
+            echo "No open release PR."
+            exit 0
+          fi
+
+          pr_number="$(echo "${pr_json}" | jq -r '.number')"
+          echo "Found release PR #${pr_number}."
+
+          merge_state="$(gh pr view "${pr_number}" --repo "${REPO}" --json mergeStateStatus --jq '.mergeStateStatus')"
+          echo "mergeStateStatus=${merge_state}"
+
+          if [ "${merge_state}" = "BEHIND" ]; then
+            set +e
+            update_output="$(gh api -X PUT "repos/${REPO}/pulls/${pr_number}/update-branch" 2>&1)"
+            update_exit=$?
+            set -e
+
+            if [ "${update_exit}" -ne 0 ]; then
+              if echo "${update_output}" | rg -q "not behind|Update branch is not possible|was modified|Expected HEAD sha"; then
+                echo "Skip update-branch: ${update_output}"
+              else
+                echo "${update_output}"
+                exit "${update_exit}"
+              fi
+            else
+              echo "Updated release PR branch with latest main."
+            fi
+          fi
+
+          is_auto_merge_enabled="$(gh pr view "${pr_number}" --repo "${REPO}" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+          if [ "${is_auto_merge_enabled}" = "true" ]; then
+            echo "Auto-merge already enabled for PR #${pr_number}."
+            exit 0
+          fi
+
+          gh pr merge "${pr_number}" --repo "${REPO}" --auto --squash --delete-branch

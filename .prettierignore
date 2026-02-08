@@ -6,3 +6,4 @@ playwright-report/
 test-results/
 .codex/
 pnpm-lock.yaml
+CHANGELOG.md

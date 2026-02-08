@@ -1,0 +1,45 @@
+name: Release Please Publish
+
+on:
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+
+concurrency:
+  group: release-please-publish-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish GitHub Release
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.pull_request.user.login == 'app/github-actions' || github.event.pull_request.user.login == 'github-actions[bot]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate release token
+        env:
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "${RELEASE_PLEASE_TOKEN}" ]; then
+            echo "::error::Missing RELEASE_PLEASE_TOKEN secret. Configure it in repository settings before publishing release."
+            exit 1
+          fi
+
+      - name: Publish release for merged release PR
+        uses: googleapis/release-please-action@v4
+        with:
+          release-type: node
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          target-branch: main
+          skip-github-pull-request: true

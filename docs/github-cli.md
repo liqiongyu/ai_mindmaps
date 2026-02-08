@@ -143,12 +143,14 @@ gh api -X PATCH "repos/$OWNER/$REPO" \
 - `AZURE_OPENAI_DEPLOYMENT`（用于 Azure OpenAI e2e）
 - `AZURE_OPENAI_API_VERSION`（可选，用于 Azure OpenAI e2e）
 - `AZURE_OPENAI_MODEL`（可选，用于 Azure OpenAI e2e）
-- `RELEASE_PLEASE_TOKEN`（用于 release PR 触发 `CI` / `Dependency Review`）
+- `RELEASE_PLEASE_TOKEN`（用于 release PR 创建/更新、自动同步分支、自动发布 GitHub Release）
 
 `RELEASE_PLEASE_TOKEN` 建议使用 Fine-grained PAT（仅授权当前仓库）：
 
 - Repository permissions / Contents: `Read and write`
 - Repository permissions / Pull requests: `Read and write`
+
+> 说明：`CHANGELOG.md` 是 release 产物，已加入 `.prettierignore`，避免 release PR 因格式检查被阻塞。
 
 设置示例：
 
