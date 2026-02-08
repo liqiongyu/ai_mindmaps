@@ -117,6 +117,7 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const [exportError, setExportError] = useState<string | null>(null);
   const [positionSaveError, setPositionSaveError] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(() => {
     if (props.mode !== "try") return new Set();
     if (!initialTryDraft) return new Set();
@@ -222,6 +223,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
   useEffect(() => {
     inspectorOpenRef.current = inspectorOpen;
   }, [inspectorOpen]);
+
+  useEffect(() => {
+    setChatDrawerOpen(false);
+  }, [persistedMindmapId]);
 
   useEffect(() => {
     if (props.mode !== "try") return;
@@ -1426,9 +1431,9 @@ export function MindmapEditor(props: MindmapEditorProps) {
   );
 
   const dragHint = useMemo(() => {
-    if (persistedMindmapId) return "拖拽：移动节点（自动保存位置）";
-    if (props.mode === "try") return "拖拽：移动节点（本地保存）";
-    return "拖拽：移动节点（演示，不会保存）";
+    if (persistedMindmapId) return "F2 编辑 · Enter 子节点 · Tab 同级 · 拖拽移动（自动保存）";
+    if (props.mode === "try") return "F2 编辑 · Enter 子节点 · Tab 同级 · 拖拽移动（本地保存）";
+    return "F2 编辑 · Enter 子节点 · Tab 同级 · 拖拽移动（演示）";
   }, [persistedMindmapId, props.mode]);
 
   const statusLabel = useMemo(() => {
@@ -1521,11 +1526,24 @@ export function MindmapEditor(props: MindmapEditorProps) {
         <div className="flex flex-col gap-0.5">
           <div className="text-sm font-medium">MindMaps AI</div>
           <div className="text-xs text-zinc-500">
-            <span className="mr-2">{statusLabel}</span>
+            <span aria-atomic="true" aria-live="polite" className="mr-2">
+              {statusLabel}
+            </span>
             选中：{selectedLabel}
           </div>
         </div>
         <div className="flex min-w-0 items-center gap-2">
+          {persistedMindmapId ? (
+            <button
+              aria-controls="mindmap-ai-panel"
+              aria-expanded={chatDrawerOpen}
+              className="shrink-0 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 lg:hidden dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              onClick={() => setChatDrawerOpen((prev) => !prev)}
+              type="button"
+            >
+              AI
+            </button>
+          ) : null}
           <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
             <div className={TOOLBAR_GROUP_CLASS_NAME}>
               <span className={TOOLBAR_GROUP_LABEL_CLASS_NAME}>编辑</span>
@@ -1694,7 +1712,10 @@ export function MindmapEditor(props: MindmapEditorProps) {
 
       {loadError ? (
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 px-6 py-10">
-          <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200">
+          <div
+            className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200"
+            role="alert"
+          >
             加载失败：{loadError}
           </div>
           <Link className="text-sm underline" href="/mindmaps">
@@ -1709,12 +1730,18 @@ export function MindmapEditor(props: MindmapEditorProps) {
         <div className="flex flex-1">
           <div className="flex min-h-0 flex-1 flex-col">
             {deleteMindmapError ? (
-              <div className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200">
+              <div
+                className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200"
+                role="alert"
+              >
                 删除失败：{deleteMindmapError}
               </div>
             ) : null}
             {shareError ? (
-              <div className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200">
+              <div
+                className="border-b border-zinc-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-red-950/30 dark:text-red-200"
+                role="alert"
+              >
                 分享失败：{shareError}
               </div>
             ) : null}
@@ -1788,22 +1815,34 @@ export function MindmapEditor(props: MindmapEditorProps) {
               </div>
             ) : null}
             {saveError ? (
-              <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
+              <div
+                className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200"
+                role="alert"
+              >
                 保存失败：{saveError}
               </div>
             ) : null}
             {uiSaveError ? (
-              <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
+              <div
+                className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200"
+                role="alert"
+              >
                 视图状态保存失败：{uiSaveError}
               </div>
             ) : null}
             {positionSaveError ? (
-              <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
+              <div
+                className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200"
+                role="alert"
+              >
                 位置保存失败：{positionSaveError}
               </div>
             ) : null}
             {exportError ? (
-              <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200">
+              <div
+                className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-red-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-red-200"
+                role="alert"
+              >
                 导出失败：{exportError}
               </div>
             ) : null}
@@ -1831,9 +1870,12 @@ export function MindmapEditor(props: MindmapEditorProps) {
           </div>
           {persistedMindmapId ? (
             <MindmapChatSidebar
+              mode="drawer"
               mindmapId={persistedMindmapId}
+              onOpenChange={setChatDrawerOpen}
               onApplyOperations={applyAIOperations}
               onRollbackToPresentId={rollbackToPresentId}
+              open={chatDrawerOpen}
               selectedNodeId={selectedNodeId}
               selectedNodeLabel={selectedLabel}
             />
