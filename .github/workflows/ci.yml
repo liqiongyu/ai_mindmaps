@@ -62,7 +62,37 @@ jobs:
         run: pnpm -s typecheck
 
       - name: Test
-        run: pnpm -s test
+        run: pnpm -s test:coverage
 
       - name: Build
         run: pnpm -s build
+
+  ui_e2e:
+    name: UI E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers (Chromium)
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: UI E2E
+        run: pnpm -s test:e2e:ui

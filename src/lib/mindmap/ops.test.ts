@@ -39,6 +39,19 @@ describe("applyOperations", () => {
     expect(next.nodesById.a.text).toBe("Renamed");
   });
 
+  test("update_notes updates node notes", () => {
+    const state = {
+      rootNodeId: "root",
+      nodesById: {
+        root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
+        a: { id: "a", parentId: "root", text: "A", notes: null, orderIndex: 0 },
+      },
+    };
+
+    const next = applyOperations(state, [{ type: "update_notes", nodeId: "a", notes: "Note" }]);
+    expect(next.nodesById.a.notes).toBe("Note");
+  });
+
   test("delete_node removes subtree and normalizes orderIndex", () => {
     const state = {
       rootNodeId: "root",
@@ -62,6 +75,32 @@ describe("applyOperations", () => {
 
     expect(children.map((n) => n.id)).toEqual(["a", "c"]);
     expect(children.map((n) => n.orderIndex)).toEqual([0, 1]);
+  });
+
+  test("delete_node rejects deleting root node", () => {
+    const state = {
+      rootNodeId: "root",
+      nodesById: {
+        root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
+      },
+    };
+
+    expect(() => applyOperations(state, [{ type: "delete_node", nodeId: "root" }])).toThrow(
+      /root/i,
+    );
+  });
+
+  test("add_node rejects unknown parent", () => {
+    const state = {
+      rootNodeId: "root",
+      nodesById: {
+        root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
+      },
+    };
+
+    expect(() =>
+      applyOperations(state, [{ type: "add_node", nodeId: "a", parentId: "missing", text: "A" }]),
+    ).toThrow(/parent/i);
   });
 
   test("move_node rejects moving into descendant", () => {
@@ -128,6 +167,20 @@ describe("applyOperations", () => {
 
     expect(children.map((n) => n.id)).toEqual(["p", "c", "q"]);
     expect(children.map((n) => n.orderIndex)).toEqual([0, 1, 2]);
+  });
+
+  test("move_node is a no-op when newParentId is same and index is omitted", () => {
+    const state = {
+      rootNodeId: "root",
+      nodesById: {
+        root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
+        a: { id: "a", parentId: "root", text: "A", notes: null, orderIndex: 0 },
+      },
+    };
+
+    const next = applyOperations(state, [{ type: "move_node", nodeId: "a", newParentId: "root" }]);
+    expect(next.nodesById.a.parentId).toBe("root");
+    expect(next.nodesById.a.orderIndex).toBe(0);
   });
 
   test("move_node reorders within the same parent by index", () => {

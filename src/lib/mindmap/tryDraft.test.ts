@@ -102,4 +102,42 @@ describe("tryDraft", () => {
     const json = JSON.stringify({ ok: true });
     expect(parseTryDraftJson(json)).toBeNull();
   });
+
+  test("returns null for legacy payload when root node is missing", () => {
+    const legacyDraft = {
+      state: {
+        rootNodeId: "missing",
+        nodesById: {
+          root: { id: "root", parentId: null, text: "Root", notes: null, orderIndex: 0 },
+        },
+      },
+      updatedAt: new Date().toISOString(),
+      ui: {
+        collapsedNodeIds: [],
+        selectedNodeId: null,
+        viewport: null,
+      },
+    };
+
+    expect(parseTryDraftJson(JSON.stringify(legacyDraft))).toBeNull();
+  });
+
+  test("returns null for legacy payload when root parentId is not null", () => {
+    const legacyDraft = {
+      state: {
+        rootNodeId: "root",
+        nodesById: {
+          root: { id: "root", parentId: "x", text: "Root", notes: null, orderIndex: 0 },
+        },
+      },
+      updatedAt: new Date().toISOString(),
+      ui: {
+        collapsedNodeIds: [],
+        selectedNodeId: null,
+        viewport: null,
+      },
+    };
+
+    expect(parseTryDraftJson(JSON.stringify(legacyDraft))).toBeNull();
+  });
 });

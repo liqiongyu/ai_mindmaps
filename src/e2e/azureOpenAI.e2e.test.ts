@@ -8,7 +8,10 @@ import { createAzureOpenAIClient, getAzureOpenAIConfigFromEnv } from "../lib/llm
 dotenv.config({ path: ".env", quiet: true });
 dotenv.config({ path: ".env.local", quiet: true });
 
-describe("azure openai (e2e)", () => {
+const hasOpenAIKey = Boolean(process.env.OPENAI_API_KEY);
+const suite = hasOpenAIKey ? describe : describe.skip;
+
+suite("azure openai (e2e)", () => {
   test("responses.create returns non-empty output_text", async () => {
     const config = getAzureOpenAIConfigFromEnv(process.env);
     const client = createAzureOpenAIClient(config);

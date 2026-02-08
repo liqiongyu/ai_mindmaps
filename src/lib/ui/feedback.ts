@@ -101,6 +101,9 @@ let state: InternalState = {
   confirmQueue: [],
 };
 
+let cachedSnapshotState: InternalState | null = null;
+let cachedSnapshot: UiFeedbackSnapshot | null = null;
+
 function emit() {
   for (const listener of listeners) listener();
 }
@@ -154,7 +157,10 @@ export const uiFeedback = {
   },
 
   getSnapshot(): UiFeedbackSnapshot {
-    return toSnapshot(state);
+    if (cachedSnapshotState === state && cachedSnapshot) return cachedSnapshot;
+    cachedSnapshotState = state;
+    cachedSnapshot = toSnapshot(state);
+    return cachedSnapshot;
   },
 
   enqueue(input: {
