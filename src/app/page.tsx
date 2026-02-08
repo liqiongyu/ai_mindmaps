@@ -168,7 +168,11 @@ export default function Home() {
                 数据是否安全？会用于训练吗？
               </summary>
               <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-                默认不将你的导图与对话用于训练（后续将提供完整隐私政策页面）。
+                默认不将你的导图与对话用于训练（见{" "}
+                <Link className="underline" href="/privacy">
+                  隐私政策
+                </Link>
+                ）。
               </p>
             </details>
           </div>
@@ -177,9 +181,15 @@ export default function Home() {
         <footer className="flex flex-col gap-3 border-t border-zinc-200 pt-8 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
           <div>默认不将你的导图与对话用于训练（MVP 文案）。</div>
           <div className="flex flex-wrap gap-4">
-            <span>隐私</span>
-            <span>安全</span>
-            <span>联系</span>
+            <Link className="underline" href="/privacy">
+              隐私
+            </Link>
+            <Link className="underline" href="/security">
+              安全
+            </Link>
+            <Link className="underline" href="/trust">
+              信任
+            </Link>
           </div>
         </footer>
       </main>

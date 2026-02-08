@@ -86,6 +86,24 @@ describe("/api/ai/chat/export route", () => {
     expect(await res.json()).toMatchObject({ ok: false, code: "chat_persistence_unavailable" });
   });
 
+  test("returns 404 when mindmap is not owned", async () => {
+    const supabase = createSupabaseMock({ userId: "u1" });
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: null,
+      error: null,
+    }));
+    mocks.state.supabase = supabase;
+
+    const { GET } = await import("./route");
+    const res = await GET(
+      new Request("http://localhost/api/ai/chat/export?mindmapId=m1&scope=global"),
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ ok: false, code: "MINDMAP_NOT_FOUND" });
+    expect(supabase.__calls.rpcs).toHaveLength(0);
+  });
+
   test("exports audit payload as an attachment", async () => {
     const supabase = createSupabaseMock({ userId: "u1" });
     mockConsumeQuota(supabase);
@@ -126,6 +144,56 @@ describe("/api/ai/chat/export route", () => {
       version: "v1",
       mindmapId: "m1",
       thread: { id: "t1", scope: "global", nodeId: null },
+    });
+  });
+
+  test("export payload includes provider/model and operations for assistant messages", async () => {
+    const supabase = createSupabaseMock({ userId: "u1" });
+    mockConsumeQuota(supabase);
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: { id: "m1" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_threads.select", async () => ({
+      data: { id: "t1", scope: "global", node_id: null, created_at: "2026-02-08T00:00:00.000Z" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_messages.select", async () => ({
+      data: [
+        {
+          id: "msg1",
+          role: "assistant",
+          content: "done",
+          operations: [{ type: "rename_node", nodeId: "n1", text: "New title" }],
+          provider: "openai",
+          model: "gpt-4o-mini",
+          created_at: "2026-02-08T00:00:01.000Z",
+        },
+      ],
+      error: null,
+    }));
+    mocks.state.supabase = supabase;
+
+    const { GET } = await import("./route");
+    const res = await GET(
+      new Request("http://localhost/api/ai/chat/export?mindmapId=m1&scope=global"),
+    );
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as unknown;
+    expect(json).toMatchObject({
+      ok: true,
+      version: "v1",
+      mindmapId: "m1",
+      messages: [
+        {
+          role: "assistant",
+          provider: "openai",
+          model: "gpt-4o-mini",
+          operations: [{ type: "rename_node", nodeId: "n1", text: "New title" }],
+          createdAt: "2026-02-08T00:00:01.000Z",
+        },
+      ],
     });
   });
 
