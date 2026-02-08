@@ -124,6 +124,119 @@ describe("/api/ai/chat route", () => {
     expect(await res.json()).toEqual({ ok: true, thread: null, messages: [] });
   });
 
+  test("GET returns metadata when available (constraints snapshot)", async () => {
+    const rootNodeId = "00000000-0000-4000-8000-000000000001";
+    const supabase = createSupabaseMock({ userId: "u1" });
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: { id: "m1" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_threads.select", async () => ({
+      data: { id: "t1", scope: "global", node_id: null, created_at: "2026-02-08T00:00:00.000Z" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_messages.select", async () => ({
+      data: [
+        {
+          id: "msg1",
+          role: "assistant",
+          content: "done",
+          operations: [{ type: "add_node", nodeId: "n1", parentId: rootNodeId, text: "New" }],
+          provider: "openai",
+          model: "gpt-4o-mini",
+          metadata: {
+            constraints: {
+              outputLanguage: "en",
+              branchCount: 4,
+              depth: 2,
+              allowMove: true,
+              allowDelete: false,
+            },
+          },
+          created_at: "2026-02-08T00:00:01.000Z",
+        },
+      ],
+      error: null,
+    }));
+    mocks.state.supabase = supabase;
+
+    const { GET } = await import("./route");
+    const res = await GET(new Request("http://localhost/api/ai/chat?mindmapId=m1&scope=global"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      thread: { id: "t1", scope: "global", nodeId: null },
+      messages: [
+        {
+          id: "msg1",
+          role: "assistant",
+          metadata: {
+            constraints: {
+              outputLanguage: "en",
+              branchCount: 4,
+              depth: 2,
+              allowMove: true,
+              allowDelete: false,
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  test("GET falls back when metadata column is missing (messages still load)", async () => {
+    const supabase = createSupabaseMock({ userId: "u1" });
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: { id: "m1" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_threads.select", async () => ({
+      data: { id: "t1", scope: "global", node_id: null, created_at: "2026-02-08T00:00:00.000Z" },
+      error: null,
+    }));
+    supabase.__setQueryHandler("chat_messages.select", async (ctx) => {
+      if (ctx.select && ctx.select.includes("metadata")) {
+        return {
+          data: null,
+          error: { code: "PGRST204", message: "could not find the 'metadata' column" },
+        };
+      }
+      return {
+        data: [
+          {
+            id: "msg1",
+            role: "user",
+            content: "hi",
+            operations: null,
+            provider: null,
+            model: null,
+            created_at: "2026-02-08T00:00:01.000Z",
+          },
+        ],
+        error: null,
+      };
+    });
+    mocks.state.supabase = supabase;
+
+    const { GET } = await import("./route");
+    const res = await GET(new Request("http://localhost/api/ai/chat?mindmapId=m1&scope=global"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      thread: { id: "t1", scope: "global", nodeId: null },
+      messages: [{ id: "msg1", role: "user", content: "hi" }],
+    });
+
+    const messageSelects = supabase.__calls.queries.filter(
+      (q) => q.table === "chat_messages" && q.operation === "select",
+    );
+    expect(messageSelects).toHaveLength(2);
+    expect(messageSelects[0]?.select).toContain("metadata");
+    expect(messageSelects[1]?.select).not.toContain("metadata");
+  });
+
   test("returns 401 UNAUTHORIZED when user is missing", async () => {
     mocks.state.supabase = createSupabaseMock({ userId: null });
     const { POST } = await import("./route");
@@ -463,7 +576,28 @@ describe("/api/ai/chat route", () => {
       data: { id: "t1" },
       error: null,
     }));
-    supabase.__setQueryHandler("chat_messages.insert", async () => ({ data: null, error: null }));
+    supabase.__setQueryHandler("chat_messages.insert", async (ctx) => {
+      const values = ctx.values as unknown;
+      expect(Array.isArray(values)).toBe(true);
+      const rows = values as Array<Record<string, unknown>>;
+      const assistant = rows.find((row) => row.role === "assistant");
+      expect(assistant).toBeTruthy();
+      expect(assistant?.metadata).toMatchObject({
+        constraints: {
+          outputLanguage: "en",
+          branchCount: 4,
+          depth: 2,
+          allowMove: true,
+          allowDelete: false,
+        },
+        changeSummary: { add: 1, rename: 0, move: 0, delete: 0, reorder: 0 },
+        deleteImpact: { nodes: 0 },
+        scope: "global",
+        selectedNodeId: null,
+        dryRun: false,
+      });
+      return { data: null, error: null };
+    });
     mocks.state.supabase = supabase;
 
     const { POST } = await import("./route");
@@ -475,6 +609,13 @@ describe("/api/ai/chat route", () => {
           mindmapId: "m1",
           scope: "global",
           userMessage: "Add a node",
+          constraints: {
+            outputLanguage: "en",
+            branchCount: 4,
+            depth: 2,
+            allowMove: true,
+            allowDelete: false,
+          },
         }),
       }),
     );

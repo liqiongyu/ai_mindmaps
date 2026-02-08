@@ -15,6 +15,11 @@ function isMissingChatPersistenceSchema(error: { code?: string; message: string 
   return /could not find the table/i.test(error.message);
 }
 
+function isMissingChatMessagesMetadataColumn(error: { code?: string; message: string }): boolean {
+  if (error.code === "PGRST204") return true;
+  return /could not find the 'metadata' column/i.test(error.message);
+}
+
 const ThreadRowSchema = z
   .object({
     id: z.string(),
@@ -32,6 +37,7 @@ const MessageRowSchema = z
     operations: z.array(OperationSchema).nullable(),
     provider: z.string().nullable(),
     model: z.string().nullable(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
     created_at: z.string(),
   })
   .strict();
@@ -181,12 +187,31 @@ export async function GET(request: Request) {
     return respondError(500, "CHAT_THREAD_PARSE_FAILED", "Failed to parse chat thread");
   }
 
-  const { data: messageRows, error: messagesError } = await supabase
+  const messagesSelectWithMetadata =
+    "id,role,content,operations,provider,model,created_at,metadata";
+
+  let messageRows: unknown = null;
+  let messagesError: { code?: string; message: string } | null = null;
+
+  const primaryMessagesResult = await supabase
     .from("chat_messages")
-    .select("id,role,content,operations,provider,model,created_at")
+    .select(messagesSelectWithMetadata)
     .eq("thread_id", threadParsed.data.id)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
+  messageRows = primaryMessagesResult.data;
+  messagesError = primaryMessagesResult.error;
+
+  if (messagesError && isMissingChatMessagesMetadataColumn(messagesError)) {
+    const fallbackMessagesResult = await supabase
+      .from("chat_messages")
+      .select("id,role,content,operations,provider,model,created_at")
+      .eq("thread_id", threadParsed.data.id)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
+    messageRows = fallbackMessagesResult.data;
+    messagesError = fallbackMessagesResult.error;
+  }
 
   if (messagesError) {
     if (isMissingChatPersistenceSchema(messagesError)) {
@@ -221,6 +246,7 @@ export async function GET(request: Request) {
       operations: m.operations,
       provider: m.provider,
       model: m.model,
+      metadata: m.metadata,
       createdAt: m.created_at,
     })),
   };

@@ -35,6 +35,11 @@ function isMissingChatPersistenceSchema(error: { code?: string; message: string 
   return /could not find the table/i.test(error.message);
 }
 
+function isMissingChatMessagesMetadataColumn(error: { code?: string; message: string }): boolean {
+  if (error.code === "PGRST204") return true;
+  return /could not find the 'metadata' column/i.test(error.message);
+}
+
 function isUniqueViolation(error: { code?: string }): boolean {
   return error.code === "23505";
 }
@@ -63,6 +68,7 @@ const ChatMessageRowBaseSchema = z.object({
   content: z.string(),
   provider: z.string().nullable(),
   model: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   created_at: z.string(),
 });
 
@@ -219,12 +225,31 @@ export async function GET(request: Request) {
     return jsonError(500, "Failed to parse chat thread");
   }
 
-  const { data: messageRows, error: messagesError } = await supabase
+  const messagesSelectWithMetadata =
+    "id,role,content,operations,provider,model,created_at,metadata";
+
+  let messageRows: unknown = null;
+  let messagesError: { code?: string; message: string } | null = null;
+
+  const primaryMessagesResult = await supabase
     .from("chat_messages")
-    .select("id,role,content,operations,provider,model,created_at")
+    .select(messagesSelectWithMetadata)
     .eq("thread_id", threadParsed.data.id)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
+  messageRows = primaryMessagesResult.data;
+  messagesError = primaryMessagesResult.error;
+
+  if (messagesError && isMissingChatMessagesMetadataColumn(messagesError)) {
+    const fallbackMessagesResult = await supabase
+      .from("chat_messages")
+      .select("id,role,content,operations,provider,model,created_at")
+      .eq("thread_id", threadParsed.data.id)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
+    messageRows = fallbackMessagesResult.data;
+    messagesError = fallbackMessagesResult.error;
+  }
 
   if (messagesError) {
     if (isMissingChatPersistenceSchema(messagesError)) {
@@ -253,6 +278,7 @@ export async function GET(request: Request) {
       operations: m.operations,
       provider: m.provider,
       model: m.model,
+      metadata: m.metadata,
       createdAt: m.created_at,
     })),
   });
@@ -394,12 +420,37 @@ export async function POST(request: Request) {
     }
 
     const changeSummary = summarizeOperations(normalized.operations);
+    let deleteImpact: { nodes: number } | null = null;
+    try {
+      const { data: nodeRows, error: nodesError } = await supabase
+        .from("mindmap_nodes")
+        .select("id,parent_id,text,notes,order_index")
+        .eq("mindmap_id", mindmapId);
+      if (!nodesError) {
+        const nodesParsed = z.array(MindmapNodeRowSchema).safeParse(nodeRows ?? []);
+        if (nodesParsed.success) {
+          const state = nodeRowsToMindmapState(mindmap.root_node_id, nodesParsed.data);
+          deleteImpact = computeDeleteImpact(state, normalized.operations);
+        }
+      }
+    } catch {
+      // Best effort: export can still succeed without delete impact.
+    }
+
+    const assistantMetadata = {
+      constraints,
+      changeSummary,
+      ...(deleteImpact ? { deleteImpact } : {}),
+      scope,
+      selectedNodeId: scope === "node" ? (selectedNodeId ?? null) : null,
+      dryRun: false,
+    };
     const nodeId = scope === "node" ? (selectedNodeId ?? null) : null;
     const threadIdResult = await getOrCreateThreadId({ supabase, mindmapId, scope, nodeId });
 
     let chatPersisted = false;
     if (threadIdResult.ok) {
-      const { error: insertError } = await supabase.from("chat_messages").insert([
+      const messagesWithMetadata = [
         {
           thread_id: threadIdResult.threadId,
           role: "user",
@@ -415,8 +466,25 @@ export async function POST(request: Request) {
           operations: normalized.operations,
           provider,
           model: modelName,
+          metadata: assistantMetadata,
         },
-      ]);
+      ];
+
+      let { error: insertError } = await supabase
+        .from("chat_messages")
+        .insert(messagesWithMetadata);
+      if (insertError && isMissingChatMessagesMetadataColumn(insertError)) {
+        ({ error: insertError } = await supabase.from("chat_messages").insert(
+          messagesWithMetadata.map((message) => ({
+            thread_id: message.thread_id,
+            role: message.role,
+            content: message.content,
+            operations: message.operations,
+            provider: message.provider,
+            model: message.model,
+          })),
+        ));
+      }
 
       if (!insertError) {
         chatPersisted = true;
@@ -701,15 +769,15 @@ export async function POST(request: Request) {
     return respondError(400, "SCOPE_VIOLATION", scopeCheck.message);
   }
 
+  const changeSummary = summarizeOperations(modelOutput.operations);
+  const deleteImpact = computeDeleteImpact(state, modelOutput.operations);
+
   try {
     applyOperations(state, modelOutput.operations);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Invalid operations";
     return respondError(400, "OPERATIONS_APPLY_FAILED", message);
   }
-
-  const changeSummary = summarizeOperations(modelOutput.operations);
-  const deleteImpact = computeDeleteImpact(state, modelOutput.operations);
 
   let chargedQuota: Awaited<ReturnType<typeof consumeQuota>>;
   try {
@@ -742,7 +810,16 @@ export async function POST(request: Request) {
     const threadIdResult = await getOrCreateThreadId({ supabase, mindmapId, scope, nodeId });
 
     if (threadIdResult.ok) {
-      const { error: insertError } = await supabase.from("chat_messages").insert([
+      const assistantMetadata = {
+        constraints,
+        changeSummary,
+        deleteImpact,
+        scope,
+        selectedNodeId: scope === "node" ? (selectedNodeId ?? null) : null,
+        dryRun,
+      };
+
+      const messagesWithMetadata = [
         {
           thread_id: threadIdResult.threadId,
           role: "user",
@@ -758,8 +835,25 @@ export async function POST(request: Request) {
           operations: modelOutput.operations,
           provider,
           model: modelName ?? null,
+          metadata: assistantMetadata,
         },
-      ]);
+      ];
+
+      let { error: insertError } = await supabase
+        .from("chat_messages")
+        .insert(messagesWithMetadata);
+      if (insertError && isMissingChatMessagesMetadataColumn(insertError)) {
+        ({ error: insertError } = await supabase.from("chat_messages").insert(
+          messagesWithMetadata.map((message) => ({
+            thread_id: message.thread_id,
+            role: message.role,
+            content: message.content,
+            operations: message.operations,
+            provider: message.provider,
+            model: message.model,
+          })),
+        ));
+      }
 
       if (!insertError) {
         chatPersisted = true;
