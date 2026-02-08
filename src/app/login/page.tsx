@@ -1,14 +1,42 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
+function getSafeNextPath(raw: string | null): string {
+  if (!raw) return "/mindmaps";
+  const candidate = raw.trim();
+  if (!candidate.startsWith("/")) return "/mindmaps";
+  if (candidate.startsWith("//")) return "/mindmaps";
+  return candidate;
+}
+
 export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 px-6 py-16">
+          <div className="flex flex-col gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">登录</h1>
+            <p className="text-sm text-zinc-600 dark:text-zinc-300">加载中…</p>
+          </div>
+        </main>
+      }
+    >
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createSupabaseBrowserClient();
+  const nextPath = getSafeNextPath(searchParams.get("next"));
+  const nextParam = searchParams.get("next");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -34,7 +62,7 @@ export default function LoginPage() {
               password,
             });
             if (error) throw error;
-            router.push("/mindmaps");
+            router.push(nextPath);
             router.refresh();
           } catch (err) {
             const message = err instanceof Error ? err.message : "登录失败";
@@ -85,7 +113,10 @@ export default function LoginPage() {
 
         <div className="text-center text-sm text-zinc-600 dark:text-zinc-300">
           没有账号？{" "}
-          <Link className="underline" href="/signup">
+          <Link
+            className="underline"
+            href={nextParam ? `/signup?next=${encodeURIComponent(nextPath)}` : "/signup"}
+          >
             注册
           </Link>
         </div>
