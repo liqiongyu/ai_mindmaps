@@ -39,7 +39,7 @@ The persisted save endpoint MUST require a `baseVersion` and MUST prevent silent
 
 When a save request is rejected due to version conflict, the client MUST provide explicit user actions to resolve the conflict.
 
-#### Scenario: Conflict banner is shown and auto-save is paused
+#### Scenario: Conflict modal is shown and auto-save is paused
 
 - **WHEN** the client receives a `409 VERSION_CONFLICT` response for a persisted save
 - **THEN** the client MUST pause automatic retries for persisted saves
