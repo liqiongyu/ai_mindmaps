@@ -271,6 +271,7 @@ describe("/api/ai/chat/export route", () => {
     expect(await res.json()).toMatchObject({
       ok: false,
       code: "quota_exceeded",
+      message: "今日审计导出已达上限，明日重置或升级套餐。",
       upgradeUrl: "/pricing",
     });
     expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual(["mma_check_quota"]);

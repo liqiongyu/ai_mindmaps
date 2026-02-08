@@ -23,8 +23,11 @@ export default function PricingPage() {
 
         <div className="mt-4 grid gap-2 text-sm">
           <div>AI 调用：100 / 天</div>
-          <div>导出：50 / 天</div>
+          <div>审计导出(JSON)：50 / 天</div>
           <div>公开分享：10（当前公开数量上限）</div>
+        </div>
+        <div className="mt-3 text-xs text-zinc-600 dark:text-zinc-300">
+          注：导出 PNG/SVG 不计入审计导出配额。
         </div>
       </section>
 

@@ -52,7 +52,7 @@ export default async function MindmapsPage({
           <div>
             <div className="text-sm font-semibold tracking-tight">账户用量</div>
             <div className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-300">
-              AI/导出按天重置；公开分享为当前公开数量。
+              AI/审计导出按天重置；公开分享为当前公开数量。（PNG/SVG 导出不计入审计导出）
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -82,7 +82,7 @@ export default async function MindmapsPage({
               {usageSummary.metrics.ai_chat.limit ?? "∞"}
             </div>
             <div>
-              导出：{usageSummary.metrics.audit_export.used} /{" "}
+              审计导出(JSON)：{usageSummary.metrics.audit_export.used} /{" "}
               {usageSummary.metrics.audit_export.limit ?? "∞"}
             </div>
             <div>
