@@ -37,6 +37,7 @@ type ExportResult = { ok: true } | { ok: false; message: string };
 export type MindmapCanvasHandle = {
   exportPng: (fileName: string) => Promise<ExportResult>;
   exportSvg: (fileName: string) => Promise<ExportResult>;
+  focusNode: (args: { nodeId: string; zoom?: number }) => { ok: true } | { ok: false };
 };
 
 type MindmapCanvasNodeData = {
@@ -359,13 +360,33 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
     [],
   );
 
+  const focusNode = useCallback((args: { nodeId: string; zoom?: number }) => {
+    const instance = reactFlowInstanceRef.current;
+    if (!instance || !instance.viewportInitialized) return { ok: false } as const;
+    const node = instance.getNodes().find((n) => n.id === args.nodeId);
+    if (!node) return { ok: false } as const;
+
+    const pos = (node as { positionAbsolute?: { x: number; y: number } }).positionAbsolute;
+    const x = (pos?.x ?? node.position.x) + (node.width ?? 0) / 2;
+    const y = (pos?.y ?? node.position.y) + (node.height ?? 0) / 2;
+    const zoom = args.zoom ?? 1.15;
+
+    try {
+      instance.setCenter(x, y, { zoom, duration: 650 });
+      return { ok: true } as const;
+    } catch {
+      return { ok: false } as const;
+    }
+  }, []);
+
   useImperativeHandle(
     ref,
     () => ({
       exportPng: (fileName) => exportWith("png", fileName),
       exportSvg: (fileName) => exportWith("svg", fileName),
+      focusNode,
     }),
-    [exportWith],
+    [exportWith, focusNode],
   );
 
   const onNodeClick = useCallback(
