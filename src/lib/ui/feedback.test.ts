@@ -45,4 +45,14 @@ describe("uiFeedback", () => {
     await expect(p2).resolves.toBe(false);
     expect(uiFeedback.getSnapshot().activeConfirm).toBeNull();
   });
+
+  test("getSnapshot is referentially stable without state changes", () => {
+    const first = uiFeedback.getSnapshot();
+    const second = uiFeedback.getSnapshot();
+    expect(second).toBe(first);
+
+    uiFeedback.enqueue({ type: "info", message: "hello" });
+    const third = uiFeedback.getSnapshot();
+    expect(third).not.toBe(second);
+  });
 });
