@@ -509,7 +509,14 @@ export async function POST(request: Request) {
 
   let mindmapContext = "";
   try {
-    mindmapContext = buildAiChatMindmapContext({ state, scope, selectedNodeId });
+    const contextResult = buildAiChatMindmapContext({ state, scope, selectedNodeId });
+    if (!contextResult.ok) {
+      return respondError(413, contextResult.code, "Context too large", {
+        hints: contextResult.hints,
+        context: contextResult.meta,
+      });
+    }
+    mindmapContext = contextResult.context;
   } catch (err) {
     const detail = err instanceof Error ? err.message : "Unknown error";
     if (scope === "node" && isNodeNotFoundError(detail)) {
@@ -617,10 +624,22 @@ export async function POST(request: Request) {
       }
       const message = lastError instanceof Error ? lastError.message : "Model call failed";
       if (/empty model output/i.test(message)) {
-        return respondError(502, "MODEL_OUTPUT_EMPTY", "Empty model output");
+        return respondError(502, "model_output_empty", "Empty model output", {
+          hints: [
+            "Switch to node scope and focus on a smaller subtree.",
+            "Reduce depth/branching constraints and retry.",
+            "Ask the AI to only work on the current branch.",
+          ],
+        });
       }
       if (/incomplete/i.test(message) || /max_output_tokens/i.test(message)) {
-        return respondError(502, "MODEL_OUTPUT_TRUNCATED", "Model output truncated");
+        return respondError(502, "model_output_truncated", "Model output truncated", {
+          hints: [
+            "Switch to node scope and focus on a smaller subtree.",
+            "Reduce depth/branching constraints and retry.",
+            "Ask the AI to only work on the current branch.",
+          ],
+        });
       }
       return respondError(502, "MODEL_OUTPUT_INVALID", "Invalid model output", {
         detail: message,

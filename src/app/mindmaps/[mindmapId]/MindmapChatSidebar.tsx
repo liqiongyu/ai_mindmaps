@@ -7,6 +7,7 @@ import {
   DEFAULT_AI_CHAT_CONSTRAINTS,
   formatAiChatConstraintsSummary,
 } from "@/lib/ai/chatConstraints";
+import { formatAiChatActionableErrorMessage, parseAiChatErrorInfo } from "@/lib/ai/chatErrors";
 import type { Operation } from "@/lib/mindmap/ops";
 import { summarizeOperations } from "@/lib/mindmap/operationSummary";
 import { track } from "@/lib/telemetry/client";
@@ -42,6 +43,16 @@ const PROMPT_CHIPS: Array<{ label: string; template: string }> = [
 ];
 
 const HIGH_RISK_DELETE_IMPACT_THRESHOLD = 10;
+
+class AiChatRequestError extends Error {
+  actions?: Array<{ label: string; onClick: () => void }>;
+
+  constructor(message: string, actions?: Array<{ label: string; onClick: () => void }>) {
+    super(message);
+    this.name = "AiChatRequestError";
+    this.actions = actions;
+  }
+}
 
 function isAiChatConstraints(value: unknown): value is AiChatConstraints {
   if (!value || typeof value !== "object") return false;
@@ -494,38 +505,68 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
         }),
       });
 
-      const previewJson = (await previewRes.json().catch(() => null)) as
-        | {
-            ok: true;
-            assistant_message: string;
-            operations: Operation[];
-            provider?: string | null;
-            model?: string | null;
-            dryRun?: boolean;
-            changeSummary?: {
-              add: number;
-              rename: number;
-              move: number;
-              delete: number;
-              reorder: number;
-            };
-            deleteImpact?: { nodes: number };
-            persistence?: { chatPersisted?: boolean };
-          }
-        | { ok: false; message?: string }
-        | null;
+      const previewJson = (await previewRes.json().catch(() => null)) as unknown;
 
-      if (!previewRes.ok || !previewJson || previewJson.ok !== true) {
-        throw new Error(
-          (previewJson && "message" in previewJson && previewJson.message) ||
-            `AI 请求失败（${previewRes.status}）`,
-        );
+      const isOk =
+        previewRes.ok &&
+        previewJson &&
+        typeof previewJson === "object" &&
+        (previewJson as { ok?: unknown }).ok === true;
+
+      if (!isOk) {
+        const info = parseAiChatErrorInfo(previewJson);
+        const message = formatAiChatActionableErrorMessage({
+          status: previewRes.status,
+          code: info.code,
+          serverMessage: info.serverMessage,
+          contextChars: info.contextChars,
+          budgetMaxChars: info.budgetMaxChars,
+        });
+
+        const actions: Array<{ label: string; onClick: () => void }> = [];
+        if (
+          (info.code === "context_too_large" ||
+            info.code === "model_output_truncated" ||
+            info.code === "model_output_empty") &&
+          scope === "global" &&
+          selectedNodeId
+        ) {
+          actions.push({
+            label: "切换到节点模式",
+            onClick: () => {
+              setScope("node");
+              setInput(content);
+            },
+          });
+        }
+        if (content) {
+          actions.push({ label: "重试", onClick: () => setInput(content) });
+        }
+
+        throw new AiChatRequestError(message, actions);
       }
 
-      const changeSummary =
-        previewJson.changeSummary ?? summarizeOperations(previewJson.operations);
+      const previewOk = previewJson as {
+        ok: true;
+        assistant_message: string;
+        operations: Operation[];
+        provider?: string | null;
+        model?: string | null;
+        dryRun?: boolean;
+        changeSummary?: {
+          add: number;
+          rename: number;
+          move: number;
+          delete: number;
+          reorder: number;
+        };
+        deleteImpact?: { nodes: number };
+        persistence?: { chatPersisted?: boolean };
+      };
+
+      const changeSummary = previewOk.changeSummary ?? summarizeOperations(previewOk.operations);
       const move = changeSummary.move + changeSummary.reorder;
-      const deleteImpactNodes = previewJson.deleteImpact?.nodes ?? 0;
+      const deleteImpactNodes = previewOk.deleteImpact?.nodes ?? 0;
       const isHighRisk =
         changeSummary.delete > 0 && deleteImpactNodes >= HIGH_RISK_DELETE_IMPACT_THRESHOLD;
 
@@ -548,7 +589,7 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
         }
       }
 
-      const applyResult = onApplyOperations(previewJson.operations);
+      const applyResult = onApplyOperations(previewOk.operations);
       if (!applyResult.ok) {
         throw new Error(applyResult.message);
       }
@@ -556,7 +597,7 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
       track("ai_ops_applied", {
         mindmapId,
         scope,
-        operationsCount: previewJson.operations.length,
+        operationsCount: previewOk.operations.length,
       });
 
       const shouldShowSummary =
@@ -579,11 +620,11 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
           ...(prev[activeThreadKey] ?? []),
           {
             role: "assistant",
-            content: previewJson.assistant_message,
-            operations: previewJson.operations,
+            content: previewOk.assistant_message,
+            operations: previewOk.operations,
             constraints: constraintsSnapshot,
-            provider: previewJson.provider ?? null,
-            model: previewJson.model ?? null,
+            provider: previewOk.provider ?? null,
+            model: previewOk.model ?? null,
             createdAt: new Date().toISOString(),
             rollbackToPresentId: applyResult.rollbackToPresentId,
           },
@@ -603,10 +644,10 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
               userMessage: content,
               constraints: constraintsSnapshot,
               providedOutput: {
-                assistant_message: previewJson.assistant_message,
-                operations: previewJson.operations,
-                provider: previewJson.provider ?? null,
-                model: previewJson.model ?? null,
+                assistant_message: previewOk.assistant_message,
+                operations: previewOk.operations,
+                provider: previewOk.provider ?? null,
+                model: previewOk.model ?? null,
               },
             }),
           });
@@ -644,19 +685,23 @@ export function MindmapChatSidebar(props: MindmapChatSidebarProps) {
       })();
     } catch (err) {
       const message = err instanceof Error ? err.message : "AI 请求失败";
+      const actions =
+        err instanceof AiChatRequestError
+          ? (err.actions ?? [])
+          : content
+            ? [
+                {
+                  label: "重试",
+                  onClick: () => setInput(content),
+                },
+              ]
+            : [];
       setError(message);
       uiFeedback.enqueue({
         type: "error",
         title: "AI 请求失败",
         message,
-        actions: content
-          ? [
-              {
-                label: "重试",
-                onClick: () => setInput(content),
-              },
-            ]
-          : [],
+        actions,
       });
     } finally {
       setSending(false);

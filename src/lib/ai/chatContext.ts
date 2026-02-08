@@ -6,6 +6,40 @@ type OutlineOptions = {
   maxTitleChars: number;
 };
 
+export type AiChatMindmapContextMeta = {
+  chars: number;
+  lines: number;
+  truncated: boolean;
+  budget: {
+    maxChars: number;
+    maxLines: number;
+    maxDepth: number;
+    maxTitleChars: number;
+    maxSiblingLines?: number;
+    maxNotesChars?: number;
+  };
+};
+
+export type AiChatMindmapContextResult =
+  | { ok: true; context: string; meta: AiChatMindmapContextMeta }
+  | {
+      ok: false;
+      code: "context_too_large";
+      message: string;
+      hints: string[];
+      meta: AiChatMindmapContextMeta;
+    };
+
+type ContextBudget = {
+  maxChars: number;
+  minLines: number;
+};
+
+type NodeContextOptions = OutlineOptions & {
+  maxNotesChars: number;
+  maxSiblingLines: number;
+};
+
 const DEFAULT_OUTLINE_OPTIONS: OutlineOptions = {
   maxDepth: 6,
   maxLines: 800,
@@ -109,23 +143,39 @@ function buildPathIds(state: MindmapState, nodeId: string): string[] {
   return path.reverse();
 }
 
+function buildGlobalMindmapContextResult(
+  state: MindmapState,
+  options: OutlineOptions,
+): { context: string; meta: Pick<AiChatMindmapContextMeta, "chars" | "lines" | "truncated"> } {
+  const nodeCount = Object.keys(state.nodesById).length;
+  const { lines, truncated } = buildOutlineLines(state, state.rootNodeId, options);
+
+  const allLines = [`Mindmap outline (id + title). Total nodes: ${nodeCount}.`, ...lines];
+  const context = allLines.join("\n");
+
+  return {
+    context,
+    meta: {
+      chars: context.length,
+      lines: allLines.length,
+      truncated,
+    },
+  };
+}
+
 export function buildGlobalMindmapContext(
   state: MindmapState,
   options?: Partial<OutlineOptions>,
 ): string {
   const merged: OutlineOptions = { ...DEFAULT_OUTLINE_OPTIONS, ...options };
-  const nodeCount = Object.keys(state.nodesById).length;
-  const { lines } = buildOutlineLines(state, state.rootNodeId, merged);
-
-  return [`Mindmap outline (id + title). Total nodes: ${nodeCount}.`, ...lines].join("\n");
+  return buildGlobalMindmapContextResult(state, merged).context;
 }
 
-export function buildNodeMindmapContext(
+function buildNodeMindmapContextResult(
   state: MindmapState,
   selectedNodeId: string,
-  options?: Partial<OutlineOptions> & { maxNotesChars?: number },
-): string {
-  const merged: OutlineOptions = { ...DEFAULT_OUTLINE_OPTIONS, ...options };
+  options: NodeContextOptions,
+): { context: string; meta: Pick<AiChatMindmapContextMeta, "chars" | "lines" | "truncated"> } {
   const node = state.nodesById[selectedNodeId];
   if (!node) {
     throw new Error(`Node not found: ${selectedNodeId}`);
@@ -136,41 +186,78 @@ export function buildNodeMindmapContext(
 
   const parentId = node.parentId;
   const siblingIds = parentId ? (childrenByParent.get(parentId) ?? []) : [selectedNodeId];
+  const visibleSiblingIds = siblingIds.slice(0, options.maxSiblingLines);
+  const hiddenSiblingCount = Math.max(0, siblingIds.length - visibleSiblingIds.length);
 
-  const { lines: subtreeLines } = buildOutlineLines(state, selectedNodeId, merged);
+  const { lines: subtreeLines, truncated } = buildOutlineLines(state, selectedNodeId, options);
 
-  const maxNotesChars = options?.maxNotesChars ?? 500;
   const notes = node.notes?.trim() ? node.notes.trim() : "";
   const truncatedNotes =
-    notes.length > maxNotesChars ? `${notes.slice(0, Math.max(0, maxNotesChars - 1))}…` : notes;
+    notes.length > options.maxNotesChars
+      ? `${notes.slice(0, Math.max(0, options.maxNotesChars - 1))}…`
+      : notes;
 
-  return [
-    `Selected node: (${node.id}) ${truncateTitle(node.text, merged.maxTitleChars)}`,
-    "",
-    "Path (root -> selected):",
-    ...pathIds.map((id) => {
-      const item = state.nodesById[id];
-      const title = item ? truncateTitle(item.text, merged.maxTitleChars) : id;
-      return `- (${id}) ${title}`;
-    }),
-    "",
-    "Siblings (same parent):",
-    ...siblingIds.map((id) => {
-      const item = state.nodesById[id];
-      const title = item ? truncateTitle(item.text, merged.maxTitleChars) : id;
-      return `- (${id}) ${title}`;
-    }),
-    "",
-    `Selected subtree outline (maxDepth=${merged.maxDepth}):`,
-    ...subtreeLines,
-    notes
-      ? ["", `Selected node notes (truncated to ${maxNotesChars} chars):`, truncatedNotes].join(
-          "\n",
-        )
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const allLines: string[] = [];
+  allLines.push(`Selected node: (${node.id}) ${truncateTitle(node.text, options.maxTitleChars)}`);
+
+  allLines.push("");
+  allLines.push("Path (root -> selected):");
+  for (const id of pathIds) {
+    const item = state.nodesById[id];
+    const title = item ? truncateTitle(item.text, options.maxTitleChars) : id;
+    allLines.push(`- (${id}) ${title}`);
+  }
+
+  allLines.push("");
+  allLines.push("Siblings (same parent):");
+  for (const id of visibleSiblingIds) {
+    const item = state.nodesById[id];
+    const title = item ? truncateTitle(item.text, options.maxTitleChars) : id;
+    allLines.push(`- (${id}) ${title}`);
+  }
+  if (hiddenSiblingCount > 0) {
+    allLines.push(`- … (and ${hiddenSiblingCount} more siblings)`);
+  }
+
+  allLines.push("");
+  allLines.push(`Selected subtree outline (maxDepth=${options.maxDepth}):`);
+  allLines.push(...subtreeLines);
+
+  if (notes) {
+    allLines.push("");
+    allLines.push(`Selected node notes (truncated to ${options.maxNotesChars} chars):`);
+    allLines.push(truncatedNotes);
+  }
+
+  const context = allLines.join("\n");
+
+  return {
+    context,
+    meta: {
+      chars: context.length,
+      lines: allLines.length,
+      truncated,
+    },
+  };
+}
+
+export function buildNodeMindmapContext(
+  state: MindmapState,
+  selectedNodeId: string,
+  options?: Partial<OutlineOptions> & { maxNotesChars?: number; maxSiblingLines?: number },
+): string {
+  const mergedOutline: OutlineOptions = { ...DEFAULT_OUTLINE_OPTIONS, ...options };
+  const nodeOptions: NodeContextOptions = {
+    ...mergedOutline,
+    maxNotesChars: options?.maxNotesChars ?? 500,
+    maxSiblingLines: options?.maxSiblingLines ?? 80,
+  };
+  return buildNodeMindmapContextResult(state, selectedNodeId, nodeOptions).context;
+}
+
+function shrinkBudget(value: number, min: number): number {
+  if (value <= min) return min;
+  return Math.max(min, Math.floor(value * 0.7));
 }
 
 export function buildAiChatMindmapContext({
@@ -178,30 +265,185 @@ export function buildAiChatMindmapContext({
   scope,
   selectedNodeId,
   largeMindmapThreshold = 300,
+  budget,
 }: {
   state: MindmapState;
   scope: "global" | "node";
   selectedNodeId?: string | null;
   largeMindmapThreshold?: number;
-}): string {
+  budget?: Partial<ContextBudget>;
+}): AiChatMindmapContextResult {
   const nodeCount = Object.keys(state.nodesById).length;
   const isLarge = nodeCount >= largeMindmapThreshold;
+
+  const defaultBudget: ContextBudget =
+    scope === "node"
+      ? { maxChars: isLarge ? 32000 : 42000, minLines: 120 }
+      : { maxChars: isLarge ? 42000 : 52000, minLines: 200 };
+  const mergedBudget: ContextBudget = { ...defaultBudget, ...budget };
+
+  const buildOk = (
+    context: string,
+    meta: AiChatMindmapContextMeta,
+  ): AiChatMindmapContextResult => ({
+    ok: true,
+    context,
+    meta,
+  });
+
+  const buildTooLarge = (
+    meta: AiChatMindmapContextMeta,
+    hints: string[],
+  ): AiChatMindmapContextResult => ({
+    ok: false,
+    code: "context_too_large",
+    message: "Mindmap context too large",
+    hints,
+    meta,
+  });
+
+  const maxAttempts = 5;
 
   if (scope === "node") {
     if (!selectedNodeId) {
       throw new Error("selectedNodeId is required for node scope context");
     }
-    return buildNodeMindmapContext(state, selectedNodeId, {
+    let options: NodeContextOptions = {
       maxDepth: isLarge ? 4 : 6,
       maxLines: isLarge ? 400 : 800,
       maxTitleChars: 80,
       maxNotesChars: isLarge ? 300 : 500,
-    });
+      maxSiblingLines: isLarge ? 40 : 80,
+    };
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const { context, meta } = buildNodeMindmapContextResult(state, selectedNodeId, options);
+      const fullMeta: AiChatMindmapContextMeta = {
+        ...meta,
+        budget: {
+          maxChars: mergedBudget.maxChars,
+          maxLines: options.maxLines,
+          maxDepth: options.maxDepth,
+          maxTitleChars: options.maxTitleChars,
+          maxNotesChars: options.maxNotesChars,
+          maxSiblingLines: options.maxSiblingLines,
+        },
+      };
+
+      if (context.length <= mergedBudget.maxChars) return buildOk(context, fullMeta);
+
+      const nextMaxLines = shrinkBudget(options.maxLines, mergedBudget.minLines);
+      const nextSiblingLines = shrinkBudget(options.maxSiblingLines, 10);
+      const nextNotesChars = shrinkBudget(options.maxNotesChars, 120);
+      const nextTitleChars = shrinkBudget(options.maxTitleChars, 50);
+      const nextDepth = attempt % 2 === 1 ? Math.max(2, options.maxDepth - 1) : options.maxDepth;
+
+      const noFurtherShrink =
+        nextMaxLines === options.maxLines &&
+        nextSiblingLines === options.maxSiblingLines &&
+        nextNotesChars === options.maxNotesChars &&
+        nextTitleChars === options.maxTitleChars &&
+        nextDepth === options.maxDepth;
+
+      options = {
+        ...options,
+        maxLines: nextMaxLines,
+        maxSiblingLines: nextSiblingLines,
+        maxNotesChars: nextNotesChars,
+        maxTitleChars: nextTitleChars,
+        maxDepth: nextDepth,
+      };
+
+      if (noFurtherShrink) {
+        return buildTooLarge(fullMeta, [
+          "Switch to node scope and focus on a smaller subtree.",
+          "Reduce depth/branching constraints and retry.",
+          "Ask the AI to only work on the current branch.",
+        ]);
+      }
+    }
+
+    const { meta } = buildNodeMindmapContextResult(state, selectedNodeId, options);
+    return buildTooLarge(
+      {
+        ...meta,
+        budget: {
+          maxChars: mergedBudget.maxChars,
+          maxLines: options.maxLines,
+          maxDepth: options.maxDepth,
+          maxTitleChars: options.maxTitleChars,
+          maxNotesChars: options.maxNotesChars,
+          maxSiblingLines: options.maxSiblingLines,
+        },
+      },
+      [
+        "Switch to node scope and focus on a smaller subtree.",
+        "Reduce depth/branching constraints and retry.",
+        "Ask the AI to only work on the current branch.",
+      ],
+    );
   }
 
-  return buildGlobalMindmapContext(state, {
+  let options: OutlineOptions = {
     maxDepth: isLarge ? 5 : 8,
     maxLines: isLarge ? 600 : 1200,
     maxTitleChars: 80,
-  });
+  };
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const { context, meta } = buildGlobalMindmapContextResult(state, options);
+    const fullMeta: AiChatMindmapContextMeta = {
+      ...meta,
+      budget: {
+        maxChars: mergedBudget.maxChars,
+        maxLines: options.maxLines,
+        maxDepth: options.maxDepth,
+        maxTitleChars: options.maxTitleChars,
+      },
+    };
+
+    if (context.length <= mergedBudget.maxChars) return buildOk(context, fullMeta);
+
+    const nextMaxLines = shrinkBudget(options.maxLines, mergedBudget.minLines);
+    const nextTitleChars = shrinkBudget(options.maxTitleChars, 50);
+    const nextDepth = attempt % 2 === 1 ? Math.max(3, options.maxDepth - 1) : options.maxDepth;
+
+    const noFurtherShrink =
+      nextMaxLines === options.maxLines &&
+      nextTitleChars === options.maxTitleChars &&
+      nextDepth === options.maxDepth;
+
+    options = {
+      ...options,
+      maxLines: nextMaxLines,
+      maxTitleChars: nextTitleChars,
+      maxDepth: nextDepth,
+    };
+
+    if (noFurtherShrink) {
+      return buildTooLarge(fullMeta, [
+        "Switch to node scope and focus on a smaller subtree.",
+        "Reduce depth/branching constraints and retry.",
+        "Ask the AI to only work on the current branch.",
+      ]);
+    }
+  }
+
+  const { meta } = buildGlobalMindmapContextResult(state, options);
+  return buildTooLarge(
+    {
+      ...meta,
+      budget: {
+        maxChars: mergedBudget.maxChars,
+        maxLines: options.maxLines,
+        maxDepth: options.maxDepth,
+        maxTitleChars: options.maxTitleChars,
+      },
+    },
+    [
+      "Switch to node scope and focus on a smaller subtree.",
+      "Reduce depth/branching constraints and retry.",
+      "Ask the AI to only work on the current branch.",
+    ],
+  );
 }
