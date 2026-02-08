@@ -53,6 +53,71 @@ function isMissingQuotaSchema(error: { code?: string; message: string }): boolea
   return /could not find the table/i.test(error.message);
 }
 
+export async function checkQuota(args: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  metric: QuotaMetric;
+  plan: string;
+  period: MeteredPeriod;
+  amount: number;
+}): Promise<QuotaConsumeResult> {
+  const { supabase, metric, plan, period, amount } = args;
+
+  const { data, error } = await supabase.rpc("mma_check_quota", {
+    p_metric: metric,
+    p_plan: plan,
+    p_period: period,
+    p_amount: amount,
+  });
+
+  if (error) {
+    if (isMissingQuotaRpc(error) || isMissingQuotaSchema(error)) {
+      const now = new Date();
+      return {
+        ok: true,
+        enforced: false,
+        metric,
+        plan,
+        period,
+        periodStart: getPeriodStartUtcDateString(period, now),
+        used: 0,
+        limit: null,
+        resetAt: getPeriodResetAtUtcIso(period, now),
+      };
+    }
+    throw new Error(error.message);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  const parsed = ConsumeQuotaRowSchema.safeParse(row);
+  if (!parsed.success) {
+    throw new Error("Invalid quota response");
+  }
+
+  const base = {
+    enforced: true as const,
+    metric: metric,
+    plan,
+    period,
+    periodStart: parsed.data.period_start,
+    used: parsed.data.used,
+    resetAt: parsed.data.reset_at ?? null,
+  };
+
+  if (!parsed.data.ok) {
+    return {
+      ...base,
+      ok: false,
+      limit: parsed.data.limit ?? 0,
+    };
+  }
+
+  return {
+    ...base,
+    ok: true,
+    limit: parsed.data.limit,
+  };
+}
+
 export async function consumeQuota(args: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   metric: QuotaMetric;

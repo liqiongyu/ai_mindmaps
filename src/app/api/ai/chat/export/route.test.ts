@@ -14,6 +14,30 @@ vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: mocks.createSupabaseServerClient,
 }));
 
+function mockCheckQuota(
+  supabase: SupabaseMock,
+  overrides?: { ok?: boolean; used?: number; limit?: number | null },
+) {
+  const ok = overrides?.ok ?? true;
+  const used = overrides?.used ?? 0;
+  const limit = overrides?.limit ?? 50;
+  supabase.__setRpcHandler("mma_check_quota", async () => ({
+    data: [
+      {
+        ok,
+        metric: "audit_export",
+        plan: "free",
+        period: "day",
+        period_start: "2026-02-08",
+        used,
+        limit,
+        reset_at: "2026-02-09T00:00:00.000Z",
+      },
+    ],
+    error: null,
+  }));
+}
+
 function mockConsumeQuota(
   supabase: SupabaseMock,
   overrides?: { ok?: boolean; used?: number; limit?: number | null },
@@ -67,6 +91,8 @@ describe("/api/ai/chat/export route", () => {
 
   test("returns 501 when chat persistence schema is missing", async () => {
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase);
+    mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1" },
       error: null,
@@ -84,6 +110,7 @@ describe("/api/ai/chat/export route", () => {
 
     expect(res.status).toBe(501);
     expect(await res.json()).toMatchObject({ ok: false, code: "chat_persistence_unavailable" });
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual(["mma_check_quota"]);
   });
 
   test("returns 404 when mindmap is not owned", async () => {
@@ -106,6 +133,7 @@ describe("/api/ai/chat/export route", () => {
 
   test("exports audit payload as an attachment", async () => {
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase);
     mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1" },
@@ -145,10 +173,15 @@ describe("/api/ai/chat/export route", () => {
       mindmapId: "m1",
       thread: { id: "t1", scope: "global", nodeId: null },
     });
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual([
+      "mma_check_quota",
+      "mma_consume_quota",
+    ]);
   });
 
   test("export payload includes provider/model and operations for assistant messages", async () => {
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase);
     mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1" },
@@ -195,11 +228,16 @@ describe("/api/ai/chat/export route", () => {
         },
       ],
     });
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual([
+      "mma_check_quota",
+      "mma_consume_quota",
+    ]);
   });
 
   test("returns 429 when over quota", async () => {
     const supabase = createSupabaseMock({ userId: "u1" });
-    mockConsumeQuota(supabase, { ok: false, used: 50, limit: 50 });
+    mockCheckQuota(supabase, { ok: false, used: 50, limit: 50 });
+    mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1" },
       error: null,
@@ -235,5 +273,7 @@ describe("/api/ai/chat/export route", () => {
       code: "quota_exceeded",
       upgradeUrl: "/pricing",
     });
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual(["mma_check_quota"]);
+    expect(supabase.__calls.queries.some((q) => q.table === "chat_threads")).toBe(false);
   });
 });

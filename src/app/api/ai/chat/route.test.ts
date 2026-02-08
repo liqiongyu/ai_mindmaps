@@ -45,6 +45,30 @@ vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: mocks.createSupabaseServerClient,
 }));
 
+function mockCheckQuota(
+  supabase: SupabaseMock,
+  overrides?: { ok?: boolean; used?: number; limit?: number | null },
+) {
+  const ok = overrides?.ok ?? true;
+  const used = overrides?.used ?? 0;
+  const limit = overrides?.limit ?? 100;
+  supabase.__setRpcHandler("mma_check_quota", async () => ({
+    data: [
+      {
+        ok,
+        metric: "ai_chat",
+        plan: "free",
+        period: "day",
+        period_start: "2026-02-08",
+        used,
+        limit,
+        reset_at: "2026-02-09T00:00:00.000Z",
+      },
+    ],
+    error: null,
+  }));
+}
+
 function mockConsumeQuota(
   supabase: SupabaseMock,
   overrides?: { ok?: boolean; used?: number; limit?: number | null },
@@ -72,6 +96,8 @@ function mockConsumeQuota(
 describe("/api/ai/chat route", () => {
   beforeEach(() => {
     vi.resetModules();
+    openaiMocks.getAzureOpenAIConfigFromEnv.mockClear();
+    openaiMocks.createAzureOpenAIClient.mockClear();
     openaiMocks.state.response = {
       status: "completed",
       output_text: "",
@@ -228,6 +254,7 @@ describe("/api/ai/chat route", () => {
     });
 
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase);
     mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1", root_node_id: rootNodeId },
@@ -271,6 +298,11 @@ describe("/api/ai/chat route", () => {
       dryRun: true,
       persistence: { chatPersisted: false },
     });
+
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual([
+      "mma_check_quota",
+      "mma_consume_quota",
+    ]);
   });
 
   test("POST returns 400 CONSTRAINT_VIOLATION when model outputs delete_node and allowDelete is false", async () => {
@@ -281,6 +313,7 @@ describe("/api/ai/chat route", () => {
     });
 
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase);
     mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1", root_node_id: rootNodeId },
@@ -315,6 +348,7 @@ describe("/api/ai/chat route", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, code: "CONSTRAINT_VIOLATION" });
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual(["mma_check_quota"]);
   });
 
   test("POST returns 429 quota_exceeded when quota is exhausted", async () => {
@@ -325,7 +359,8 @@ describe("/api/ai/chat route", () => {
     });
 
     const supabase = createSupabaseMock({ userId: "u1" });
-    mockConsumeQuota(supabase, { ok: false, used: 100, limit: 100 });
+    mockCheckQuota(supabase, { ok: false, used: 100, limit: 100 });
+    mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1", root_node_id: rootNodeId },
       error: null,
@@ -356,6 +391,8 @@ describe("/api/ai/chat route", () => {
       code: "quota_exceeded",
       upgradeUrl: "/pricing",
     });
+    expect(openaiMocks.createAzureOpenAIClient).not.toHaveBeenCalled();
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual(["mma_check_quota"]);
   });
 
   test("POST returns 400 SCOPE_VIOLATION when node-scoped operations modify outside subtree", async () => {
@@ -369,6 +406,7 @@ describe("/api/ai/chat route", () => {
     });
 
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase);
     mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1", root_node_id: rootNodeId },
@@ -400,6 +438,7 @@ describe("/api/ai/chat route", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, code: "SCOPE_VIOLATION" });
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual(["mma_check_quota"]);
   });
 
   test("POST persists chat messages when dryRun is false and persistence is available", async () => {
@@ -410,6 +449,7 @@ describe("/api/ai/chat route", () => {
     });
 
     const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase);
     mockConsumeQuota(supabase);
     supabase.__setQueryHandler("mindmaps.select", async () => ({
       data: { id: "m1", root_node_id: rootNodeId },
@@ -441,5 +481,90 @@ describe("/api/ai/chat route", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, persistence: { chatPersisted: true } });
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual([
+      "mma_check_quota",
+      "mma_consume_quota",
+    ]);
+  });
+
+  test("POST does not consume quota when model output is invalid", async () => {
+    const rootNodeId = "00000000-0000-4000-8000-000000000001";
+    openaiMocks.state.response.output_text = "not json";
+
+    const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase);
+    mockConsumeQuota(supabase);
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: { id: "m1", root_node_id: rootNodeId },
+      error: null,
+    }));
+    supabase.__setQueryHandler("mindmap_nodes.select", async () => ({
+      data: [{ id: rootNodeId, parent_id: null, text: "Root", notes: null, order_index: 0 }],
+      error: null,
+    }));
+    mocks.state.supabase = supabase;
+
+    const { POST } = await import("./route");
+    const res = await POST(
+      new Request("http://localhost/api/ai/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mindmapId: "m1",
+          scope: "global",
+          userMessage: "Do something",
+          dryRun: true,
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ ok: false });
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual(["mma_check_quota"]);
+  });
+
+  test("POST returns 429 when check passes but consume is denied (concurrency edge)", async () => {
+    const rootNodeId = "00000000-0000-4000-8000-000000000001";
+    openaiMocks.state.response.output_text = JSON.stringify({
+      assistant_message: "OK",
+      operations: [{ type: "rename_node", nodeId: rootNodeId, text: "Root (renamed)" }],
+    });
+
+    const supabase = createSupabaseMock({ userId: "u1" });
+    mockCheckQuota(supabase, { ok: true, used: 99, limit: 100 });
+    mockConsumeQuota(supabase, { ok: false, used: 100, limit: 100 });
+    supabase.__setQueryHandler("mindmaps.select", async () => ({
+      data: { id: "m1", root_node_id: rootNodeId },
+      error: null,
+    }));
+    supabase.__setQueryHandler("mindmap_nodes.select", async () => ({
+      data: [{ id: rootNodeId, parent_id: null, text: "Root", notes: null, order_index: 0 }],
+      error: null,
+    }));
+    mocks.state.supabase = supabase;
+
+    const { POST } = await import("./route");
+    const res = await POST(
+      new Request("http://localhost/api/ai/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mindmapId: "m1",
+          scope: "global",
+          userMessage: "Rename root",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ ok: false, code: "quota_exceeded" });
+    expect(supabase.__calls.rpcs.map((c) => c.fn)).toEqual([
+      "mma_check_quota",
+      "mma_consume_quota",
+    ]);
+    expect(supabase.__calls.queries.some((q) => q.table === "chat_threads")).toBe(false);
+    expect(
+      supabase.__calls.queries.some((q) => q.table === "chat_messages" && q.operation === "insert"),
+    ).toBe(false);
   });
 });
