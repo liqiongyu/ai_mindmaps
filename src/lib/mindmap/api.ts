@@ -5,6 +5,7 @@ import { MindmapStateSchema } from "./storage";
 export const CreateMindmapRequestSchema = z
   .object({
     title: z.string().min(1).optional(),
+    templateId: z.string().uuid().optional(),
   })
   .strict();
 

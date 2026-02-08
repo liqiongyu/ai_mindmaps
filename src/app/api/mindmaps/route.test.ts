@@ -189,5 +189,143 @@ describe("/api/mindmaps route", () => {
         "mindmaps.delete",
       ]);
     });
+
+    test("creates mindmap from template id", async () => {
+      const supabase = createSupabaseMock({ userId: "u1" });
+      const templateId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      supabase.__setQueryHandler("mindmap_templates.select", async () => ({
+        data: {
+          id: templateId,
+          title: "学习计划",
+          state: {
+            rootNodeId: "11111111-1111-4aaa-8aaa-111111111111",
+            nodesById: {
+              "11111111-1111-4aaa-8aaa-111111111111": {
+                id: "11111111-1111-4aaa-8aaa-111111111111",
+                parentId: null,
+                text: "学习计划",
+                notes: null,
+                orderIndex: 0,
+              },
+              "22222222-2222-4aaa-8aaa-222222222222": {
+                id: "22222222-2222-4aaa-8aaa-222222222222",
+                parentId: "11111111-1111-4aaa-8aaa-111111111111",
+                text: "目标",
+                notes: null,
+                orderIndex: 0,
+              },
+            },
+          },
+        },
+        error: null,
+      }));
+      supabase.__setQueryHandler("mindmaps.insert", async () => ({ data: null, error: null }));
+      supabase.__setRpcHandler("mma_replace_mindmap_nodes", async () => ({
+        data: { ok: true, version: 2 },
+        error: null,
+      }));
+      mocks.state.supabase = supabase;
+
+      const { POST } = await import("./route");
+
+      const res = await POST(
+        new Request("http://localhost/api/mindmaps", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ templateId }),
+        }) as never,
+      );
+
+      expect(res.status).toBe(201);
+      const json = (await res.json()) as { ok: true; mindmapId: string; rootNodeId: string };
+      expect(json.ok).toBe(true);
+      expect(json.mindmapId).toMatch(/.+/);
+      expect(json.rootNodeId).toMatch(/.+/);
+
+      expect(supabase.__calls.queries.map((q) => `${q.table}.${q.operation}`)).toEqual([
+        "mindmap_templates.select",
+        "mindmaps.insert",
+      ]);
+      expect(supabase.__calls.rpcs[0]?.fn).toBe("mma_replace_mindmap_nodes");
+      expect(supabase.__calls.rpcs[0]?.params.p_base_version).toBe(1);
+    });
+
+    test("returns 404 when template id not found", async () => {
+      const supabase = createSupabaseMock({ userId: "u1" });
+      const templateId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      supabase.__setQueryHandler("mindmap_templates.select", async () => ({
+        data: null,
+        error: null,
+      }));
+      mocks.state.supabase = supabase;
+
+      const { POST } = await import("./route");
+
+      const res = await POST(
+        new Request("http://localhost/api/mindmaps", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ templateId }),
+        }) as never,
+      );
+
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ ok: false, message: "Template not found" });
+    });
+
+    test("returns 503 when atomic save RPC is missing", async () => {
+      const supabase = createSupabaseMock({ userId: "u1" });
+      const templateId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      supabase.__setQueryHandler("mindmap_templates.select", async () => ({
+        data: {
+          id: templateId,
+          title: "学习计划",
+          state: {
+            rootNodeId: "11111111-1111-4aaa-8aaa-111111111111",
+            nodesById: {
+              "11111111-1111-4aaa-8aaa-111111111111": {
+                id: "11111111-1111-4aaa-8aaa-111111111111",
+                parentId: null,
+                text: "学习计划",
+                notes: null,
+                orderIndex: 0,
+              },
+            },
+          },
+        },
+        error: null,
+      }));
+      supabase.__setQueryHandler("mindmaps.insert", async () => ({ data: null, error: null }));
+      supabase.__setQueryHandler("mindmaps.delete", async () => ({ data: null, error: null }));
+      supabase.__setRpcHandler("mma_replace_mindmap_nodes", async () => ({
+        data: null,
+        error: {
+          code: "PGRST202",
+          message: "could not find the function mma_replace_mindmap_nodes",
+        },
+      }));
+      mocks.state.supabase = supabase;
+
+      const { POST } = await import("./route");
+
+      const res = await POST(
+        new Request("http://localhost/api/mindmaps", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ templateId }),
+        }) as never,
+      );
+
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({
+        ok: false,
+        message: "Atomic save RPC is missing. Apply Supabase migrations first.",
+      });
+      expect(supabase.__calls.queries.map((q) => `${q.table}.${q.operation}`)).toEqual([
+        "mindmap_templates.select",
+        "mindmaps.insert",
+        "mindmaps.delete",
+      ]);
+    });
   });
 });
