@@ -1,13 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { CreateMindmapRequestSchema } from "@/lib/mindmap/api";
+import { listMindmapsPage } from "@/lib/mindmap/mindmapList";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 function jsonError(status: number, message: string, extra?: Record<string, unknown>) {
   return NextResponse.json({ ok: false, message, ...extra }, { status });
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.getUser();
 
@@ -15,26 +16,26 @@ export async function GET() {
     return jsonError(401, "Unauthorized");
   }
 
-  const { data: mindmaps, error: listError } = await supabase
-    .from("mindmaps")
-    .select("id,title,updated_at,is_public,public_slug")
-    .eq("owner_id", data.user.id)
-    .order("updated_at", { ascending: false });
+  const url = new URL(request.url);
+  const result = await listMindmapsPage({
+    supabase,
+    userId: data.user.id,
+    cursor: url.searchParams.get("cursor"),
+    limit: url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : null,
+    q: url.searchParams.get("q"),
+  });
 
-  if (listError) {
-    return jsonError(500, "Failed to list mindmaps", { detail: listError.message });
+  if (!result.ok) {
+    const status =
+      result.message === "Invalid cursor" || result.message === "Invalid query" ? 400 : 500;
+    return jsonError(status, "Failed to list mindmaps", { detail: result.message });
   }
 
   return NextResponse.json({
     ok: true,
-    mindmaps:
-      mindmaps?.map((m) => ({
-        id: m.id,
-        title: m.title,
-        updatedAt: m.updated_at,
-        isPublic: m.is_public,
-        publicSlug: m.public_slug,
-      })) ?? [],
+    items: result.items,
+    nextCursor: result.nextCursor,
+    total: result.total,
   });
 }
 

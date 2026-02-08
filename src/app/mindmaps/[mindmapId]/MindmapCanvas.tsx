@@ -22,6 +22,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
   type ForwardedRef,
 } from "react";
 
@@ -164,6 +165,8 @@ const MindmapNode = memo(function MindmapNode({
 
 MindmapNode.displayName = "MindmapNode";
 
+const NODE_TYPES = { mindmapNode: MindmapNode } as const;
+
 export const MindmapCanvas = forwardRef(function MindmapCanvas(
   {
     state,
@@ -199,53 +202,98 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance<MindmapCanvasNode> | null>(null);
   const draggingRef = useRef(false);
+  const [dragging, setDragging] = useState(false);
 
-  const { nodes: layoutNodes, edges } = useMemo(() => {
-    const graph = mindmapStateToFlow(state, { collapsedNodeIds });
-    const nextNodes = graph.nodes.map((node): MindmapCanvasNode => {
+  const flowGraph = useMemo(
+    () => mindmapStateToFlow(state, { collapsedNodeIds }),
+    [collapsedNodeIds, state],
+  );
+
+  const rootNodeId = state.rootNodeId;
+
+  const layoutNodes = useMemo(() => {
+    return flowGraph.nodes.map((node): MindmapCanvasNode => {
       return {
         ...node,
         type: "mindmapNode",
-        draggable: editable && node.id !== state.rootNodeId,
+        draggable: editable && node.id !== rootNodeId,
         data: {
           label: node.data.label,
-          isEditing: node.id === editingNodeId,
-          highlight: highlightByNodeId?.[node.id] ?? null,
+          isEditing: false,
+          highlight: null,
           onSelectNodeId,
           onRequestEditNodeId,
           onCommitNodeTitle,
           onCancelEditNodeId,
         },
-        selected: node.id === selectedNodeId,
+        selected: false,
       };
     });
-    return { nodes: nextNodes, edges: graph.edges };
   }, [
-    collapsedNodeIds,
     editable,
-    editingNodeId,
-    highlightByNodeId,
+    flowGraph.nodes,
     onCancelEditNodeId,
     onCommitNodeTitle,
     onSelectNodeId,
     onRequestEditNodeId,
-    selectedNodeId,
-    state,
+    rootNodeId,
   ]);
+
+  const edges = flowGraph.edges;
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
 
   useEffect(() => {
-    if (draggingRef.current) return;
+    if (dragging) return;
     setNodes((current) => {
       const currentById = new Map(current.map((node) => [node.id, node]));
       return layoutNodes.map((layoutNode) => {
         const existing = currentById.get(layoutNode.id);
         if (!existing) return layoutNode;
-        return { ...layoutNode, position: existing.position };
+        return {
+          ...layoutNode,
+          position: existing.position,
+          selected: existing.selected,
+          data: {
+            ...layoutNode.data,
+            isEditing: existing.data.isEditing,
+            highlight: existing.data.highlight,
+          },
+        };
       });
     });
-  }, [layoutNodes, setNodes]);
+  }, [dragging, layoutNodes, setNodes]);
+
+  useEffect(() => {
+    setNodes((current) =>
+      current.map((node) => {
+        const selected = node.id === selectedNodeId;
+        const isEditing = node.id === editingNodeId;
+        const highlight = highlightByNodeId?.[node.id] ?? null;
+        const draggable = editable && node.id !== state.rootNodeId;
+
+        if (
+          node.selected === selected &&
+          node.draggable === draggable &&
+          node.data.isEditing === isEditing &&
+          node.data.highlight === highlight
+        ) {
+          return node;
+        }
+
+        return {
+          ...node,
+          selected,
+          draggable,
+          data: {
+            ...node.data,
+            isEditing,
+            highlight,
+          },
+        };
+      }),
+    );
+  }, [editable, editingNodeId, highlightByNodeId, selectedNodeId, setNodes, state.rootNodeId]);
 
   const exportWith = useCallback(
     async (format: "png" | "svg", fileName: string): Promise<ExportResult> => {
@@ -330,6 +378,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
   const onNodeDragStart = useCallback(
     (_event: unknown, node: Node) => {
       draggingRef.current = true;
+      setDragging(true);
       onSelectNodeId(node.id);
       setNodes((current) =>
         current.map((n) =>
@@ -337,17 +386,18 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
         ),
       );
     },
-    [onSelectNodeId, setNodes],
+    [onSelectNodeId, setNodes, setDragging],
   );
 
   const onNodeDragStop = useCallback(
     (_event: unknown, node: Node) => {
       draggingRef.current = false;
+      setDragging(false);
       if (!editable) return;
       if (node.id === state.rootNodeId) return;
       onPersistNodePosition?.({ nodeId: node.id, x: node.position.x, y: node.position.y });
     },
-    [editable, onPersistNodePosition, state.rootNodeId],
+    [editable, onPersistNodePosition, setDragging, state.rootNodeId],
   );
 
   const onPaneClick = useCallback(() => {
@@ -364,7 +414,7 @@ export const MindmapCanvas = forwardRef(function MindmapCanvas(
         nodesConnectable={false}
         nodesDraggable={editable}
         nodesFocusable
-        nodeTypes={{ mindmapNode: MindmapNode }}
+        nodeTypes={NODE_TYPES}
         onNodeDragStart={editable ? onNodeDragStart : undefined}
         onNodeDragStop={editable ? onNodeDragStop : undefined}
         onMoveEnd={(event, viewport) => {

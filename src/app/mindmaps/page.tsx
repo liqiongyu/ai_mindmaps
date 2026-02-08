@@ -3,9 +3,14 @@ import { redirect } from "next/navigation";
 import { MindmapsListClient } from "./MindmapsListClient";
 import { SignOutButton } from "./SignOutButton";
 
+import { listMindmapsPage } from "@/lib/mindmap/mindmapList";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export default async function MindmapsPage() {
+export default async function MindmapsPage({
+  searchParams,
+}: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.getUser();
 
@@ -13,11 +18,15 @@ export default async function MindmapsPage() {
     redirect("/login");
   }
 
-  const { data: mindmaps, error: mindmapsError } = await supabase
-    .from("mindmaps")
-    .select("id,title,updated_at,is_public,public_slug")
-    .eq("owner_id", data.user.id)
-    .order("updated_at", { ascending: false });
+  const qParam = searchParams?.q;
+  const q = Array.isArray(qParam) ? qParam[0] : qParam;
+
+  const listResult = await listMindmapsPage({
+    supabase,
+    userId: data.user.id,
+    limit: 20,
+    q: q ?? null,
+  });
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-6 py-16">
@@ -29,21 +38,16 @@ export default async function MindmapsPage() {
         <SignOutButton />
       </header>
 
-      {mindmapsError ? (
+      {!listResult.ok ? (
         <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-950/50 dark:bg-red-950/30 dark:text-red-200">
-          加载失败：{mindmapsError.message}
+          加载失败：{listResult.message}
         </div>
       ) : (
         <MindmapsListClient
-          initialMindmaps={
-            mindmaps?.map((m) => ({
-              id: m.id,
-              title: m.title,
-              updatedAt: m.updated_at,
-              isPublic: m.is_public,
-              publicSlug: m.public_slug,
-            })) ?? []
-          }
+          initialItems={listResult.items}
+          initialNextCursor={listResult.nextCursor}
+          initialQuery={q ?? ""}
+          initialTotal={listResult.total}
         />
       )}
     </main>
