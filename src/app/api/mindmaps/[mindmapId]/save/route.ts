@@ -13,6 +13,11 @@ function isMissingAtomicSaveRpc(error: { code?: string; message: string }): bool
   return /could not find the function/i.test(error.message);
 }
 
+function isMindmapParentFkViolation(error: { code?: string; message: string }): boolean {
+  if (error.code === "23503") return true;
+  return /mindmap_nodes_parent_id_fkey/i.test(error.message);
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ mindmapId: string }> },
@@ -81,11 +86,12 @@ export async function POST(
     return NextResponse.json({ ok: true });
   }
 
-  if (!isMissingAtomicSaveRpc(rpcError)) {
+  const canFallback = isMissingAtomicSaveRpc(rpcError) || isMindmapParentFkViolation(rpcError);
+  if (!canFallback) {
     return jsonError(500, "Failed to save mindmap nodes", { detail: rpcError.message });
   }
 
-  // Fallback path (RPC not deployed): do a best-effort non-destructive save.
+  // Fallback path for older schema or FK ordering conflicts in RPC execution.
   const { error: updateError } = await supabase
     .from("mindmaps")
     .update({ title: inferredTitle })
@@ -96,12 +102,14 @@ export async function POST(
     return jsonError(500, "Failed to update mindmap", { detail: updateError.message });
   }
 
-  const { error: upsertError } = await supabase.from("mindmap_nodes").upsert(rows, {
-    onConflict: "id",
-  });
+  for (const row of rows) {
+    const { error: upsertError } = await supabase.from("mindmap_nodes").upsert([row], {
+      onConflict: "id",
+    });
 
-  if (upsertError) {
-    return jsonError(500, "Failed to save mindmap nodes", { detail: upsertError.message });
+    if (upsertError) {
+      return jsonError(500, "Failed to save mindmap nodes", { detail: upsertError.message });
+    }
   }
 
   const ids = rows.map((r) => r.id);

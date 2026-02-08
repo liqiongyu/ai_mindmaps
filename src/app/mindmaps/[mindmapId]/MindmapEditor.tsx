@@ -135,6 +135,8 @@ export function MindmapEditor(props: MindmapEditorProps) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSeqRef = useRef(0);
   const skipNextSaveRef = useRef(false);
+  const persistedSaveInFlightRef = useRef(false);
+  const persistedSaveQueuedBodyRef = useRef<string | null>(null);
   const uiSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const uiSaveSeqRef = useRef(0);
   const skipNextUiSaveRef = useRef(false);
@@ -270,7 +272,11 @@ export function MindmapEditor(props: MindmapEditorProps) {
     setHistory(null);
     historyRef.current = null;
     stateRef.current = null;
+    saveSeqRef.current = 0;
+    uiSaveSeqRef.current = 0;
     pendingSaveRef.current = false;
+    persistedSaveInFlightRef.current = false;
+    persistedSaveQueuedBodyRef.current = null;
     pendingUiSaveRef.current = false;
     uiStateJsonRef.current = null;
     setSelectedNodeId(null);
@@ -407,6 +413,51 @@ export function MindmapEditor(props: MindmapEditorProps) {
     };
   }, [collapsedNodeIds, loadError, persistedMindmapId, selectedNodeId, viewport]);
 
+  const flushPersistedSave = useCallback(async () => {
+    if (!persistedMindmapId) return;
+    if (persistedSaveInFlightRef.current) return;
+    const body = persistedSaveQueuedBodyRef.current;
+    if (!body) return;
+
+    persistedSaveQueuedBodyRef.current = null;
+    persistedSaveInFlightRef.current = true;
+    const requestId = (saveSeqRef.current += 1);
+
+    try {
+      const res = await fetch(`/api/mindmaps/${persistedMindmapId}/save`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true }
+        | { ok: false; message?: string }
+        | null;
+
+      if (!res.ok || !json || json.ok !== true) {
+        throw new Error((json && "message" in json && json.message) || `保存失败（${res.status}）`);
+      }
+
+      if (saveSeqRef.current === requestId && !persistedSaveQueuedBodyRef.current) {
+        pendingSaveRef.current = false;
+        setSaveStatus("saved");
+        setSaveError(null);
+      }
+    } catch (err) {
+      if (saveSeqRef.current === requestId && !persistedSaveQueuedBodyRef.current) {
+        pendingSaveRef.current = false;
+        const message = err instanceof Error ? err.message : "保存失败";
+        setSaveStatus("error");
+        setSaveError(message);
+      }
+    } finally {
+      persistedSaveInFlightRef.current = false;
+      if (persistedSaveQueuedBodyRef.current) {
+        void flushPersistedSave();
+      }
+    }
+  }, [persistedMindmapId]);
+
   useEffect(() => {
     if (!persistedMindmapId) return;
     if (!state) return;
@@ -424,42 +475,16 @@ export function MindmapEditor(props: MindmapEditorProps) {
     setSaveStatus("saving");
     setSaveError(null);
     pendingSaveRef.current = true;
-    const seq = (saveSeqRef.current += 1);
 
     saveTimerRef.current = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/mindmaps/${persistedMindmapId}/save`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ state }),
-        });
-        const json = (await res.json().catch(() => null)) as
-          | { ok: true }
-          | { ok: false; message?: string }
-          | null;
-
-        if (saveSeqRef.current !== seq) return;
-        if (!res.ok || !json || json.ok !== true) {
-          throw new Error(
-            (json && "message" in json && json.message) || `保存失败（${res.status}）`,
-          );
-        }
-
-        pendingSaveRef.current = false;
-        setSaveStatus("saved");
-        setSaveError(null);
-      } catch (err) {
-        if (saveSeqRef.current !== seq) return;
-        const message = err instanceof Error ? err.message : "保存失败";
-        setSaveStatus("error");
-        setSaveError(message);
-      }
+      persistedSaveQueuedBodyRef.current = JSON.stringify({ state });
+      void flushPersistedSave();
     }, 500);
 
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [loadError, persistedMindmapId, state]);
+  }, [flushPersistedSave, loadError, persistedMindmapId, state]);
 
   useEffect(() => {
     if (!persistedMindmapId) return;

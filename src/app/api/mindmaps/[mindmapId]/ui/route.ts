@@ -9,6 +9,11 @@ function jsonError(status: number, message: string, extra?: Record<string, unkno
   return NextResponse.json({ ok: false, message, ...extra }, { status });
 }
 
+function isMissingUiStateSchema(error: { code?: string; message: string }): boolean {
+  if (error.code === "PGRST205") return true;
+  return /could not find the table/i.test(error.message);
+}
+
 const MindmapUiStateUpdateSchema = z.object({
   collapsedNodeIds: z.array(z.string().uuid()),
   selectedNodeId: z.string().uuid().nullable(),
@@ -60,6 +65,9 @@ export async function POST(
   );
 
   if (upsertError) {
+    if (isMissingUiStateSchema(upsertError)) {
+      return NextResponse.json({ ok: true });
+    }
     return jsonError(500, "Failed to persist mindmap UI state", { detail: upsertError.message });
   }
 
