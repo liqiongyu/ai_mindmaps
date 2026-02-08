@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -15,6 +15,23 @@ function getSafeNextPath(raw: string | null): string {
 }
 
 export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 px-6 py-16">
+          <div className="flex flex-col gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">登录</h1>
+            <p className="text-sm text-zinc-600 dark:text-zinc-300">加载中…</p>
+          </div>
+        </main>
+      }
+    >
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createSupabaseBrowserClient();
